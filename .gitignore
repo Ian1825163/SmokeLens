@@ -1,0 +1,15 @@
+.pio/
+.vscode/
+arduino_secrets.h
+*.bin
+*.elf
+*.map
+backend/node_modules/
+backend/.env
+data/*.sqlite
+data/*.sqlite-*
+data/*.db
+data/*.db-*
+data/*.csv
+data/*.jsonl
+data/mosquitto/

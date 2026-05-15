@@ -1,0 +1,426 @@
+/*
+  SmokeLens ESP32 sensor node
+
+  Arduino IDE libraries to install:
+  - PubSubClient by Nick O'Leary
+  - ArduinoJson by Benoit Blanchon
+
+  Board:
+  - ESP32 Dev Module / ESP32 DevKit V1
+*/
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <HardwareSerial.h>
+#include <time.h>
+
+#if __has_include("arduino_secrets.h")
+#include "arduino_secrets.h"
+#endif
+
+#ifndef SMOKELENS_WIFI_SSID
+#define SMOKELENS_WIFI_SSID "YOUR_SSID"
+#endif
+
+#ifndef SMOKELENS_WIFI_PASSWORD
+#define SMOKELENS_WIFI_PASSWORD "YOUR_PASSWORD"
+#endif
+
+#ifndef SMOKELENS_MQTT_SERVER
+#define SMOKELENS_MQTT_SERVER "192.168.x.x"
+#endif
+
+#ifndef SMOKELENS_NODE_ID
+#define SMOKELENS_NODE_ID "node_01"
+#endif
+
+// =========================
+// User configuration
+// =========================
+const char *WIFI_SSID = SMOKELENS_WIFI_SSID;
+const char *WIFI_PASSWORD = SMOKELENS_WIFI_PASSWORD;
+
+const char *MQTT_SERVER = SMOKELENS_MQTT_SERVER;
+const uint16_t MQTT_PORT = 1883;
+const char *NODE_ID = SMOKELENS_NODE_ID;
+
+// Set to false for first wiring tests if WiFi/MQTT is not ready yet.
+const bool ENABLE_WIFI_MQTT = true;
+
+// For a quick wiring test you can reduce this to 20000UL.
+const uint32_t MQ_WARMUP_MS = 20000UL;
+
+// =========================
+// Pin configuration
+// =========================
+const uint8_t MQ135_PIN = 36;  // VOC, ADC1_CH0, VP
+const uint8_t MQ7_PIN = 39;    // CO,  ADC1_CH3, VN
+
+const int PMS_RX_PIN = 16;  // ESP32 UART2 RX, connect to PMS5003T TX
+const int PMS_TX_PIN = 17;  // Not connected, kept for UART2 init
+
+// =========================
+// Runtime constants
+// =========================
+const uint32_t SERIAL_BAUD = 115200;
+const uint32_t PMS_BAUD = 9600;
+const uint32_t SAMPLE_INTERVAL_MS = 5000UL;
+const uint32_t WIFI_RETRY_INTERVAL_MS = 5000UL;
+const uint32_t MQTT_RETRY_INTERVAL_MS = 5000UL;
+const uint32_t PMS_READ_TIMEOUT_MS = 1500UL;
+
+const uint8_t ADC_SAMPLE_COUNT = 10;
+const uint16_t PMS_FRAME_SIZE = 32;
+const uint16_t PMS_PAYLOAD_LENGTH = 28;
+
+HardwareSerial pmsSerial(2);
+WiFiClient wifiClient;
+PubSubClient mqtt(wifiClient);
+
+char mqttTopic[96];
+uint32_t lastWiFiAttemptMs = 0;
+uint32_t lastMQTTAttemptMs = 0;
+uint32_t lastSampleMs = 0;
+bool timeConfigured = false;
+
+struct PMS5003TData {
+  bool valid;
+  uint16_t pm1_0;
+  uint16_t pm2_5;
+  uint16_t pm10;
+  float temperature;
+  float humidity;
+};
+
+bool wifiConfigLooksValid() {
+  return ENABLE_WIFI_MQTT && strlen(WIFI_SSID) > 0 &&
+         strcmp(WIFI_SSID, "YOUR_SSID") != 0 &&
+         strcmp(MQTT_SERVER, "192.168.x.x") != 0;
+}
+
+uint16_t readU16BE(const uint8_t *buffer, size_t index) {
+  return (static_cast<uint16_t>(buffer[index]) << 8) | buffer[index + 1];
+}
+
+bool readByteWithTimeout(Stream &stream, uint8_t &value, uint32_t startMs,
+                         uint32_t timeoutMs) {
+  while (millis() - startMs < timeoutMs) {
+    int incoming = stream.read();
+    if (incoming >= 0) {
+      value = static_cast<uint8_t>(incoming);
+      return true;
+    }
+    delay(1);
+  }
+  return false;
+}
+
+void setupADC() {
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+  analogSetPinAttenuation(MQ135_PIN, ADC_11db);
+  analogSetPinAttenuation(MQ7_PIN, ADC_11db);
+}
+
+uint16_t readADCAverage(uint8_t pin) {
+  uint32_t sum = 0;
+
+  for (uint8_t i = 0; i < ADC_SAMPLE_COUNT; ++i) {
+    sum += analogRead(pin);
+    delay(5);
+  }
+
+  return static_cast<uint16_t>((sum + ADC_SAMPLE_COUNT / 2) / ADC_SAMPLE_COUNT);
+}
+
+uint16_t readMilliVoltAverage(uint8_t pin) {
+  uint32_t sum = 0;
+
+  for (uint8_t i = 0; i < ADC_SAMPLE_COUNT; ++i) {
+    sum += analogReadMilliVolts(pin);
+    delay(5);
+  }
+
+  return static_cast<uint16_t>((sum + ADC_SAMPLE_COUNT / 2) / ADC_SAMPLE_COUNT);
+}
+
+void drainPMSInput() {
+  while (pmsSerial.available() > 0) {
+    pmsSerial.read();
+  }
+}
+
+bool readPMSFrame(PMS5003TData &data, uint32_t timeoutMs) {
+  uint8_t frame[PMS_FRAME_SIZE] = {0};
+  uint32_t startMs = millis();
+
+  while (millis() - startMs < timeoutMs) {
+    uint8_t firstByte = 0;
+    if (!readByteWithTimeout(pmsSerial, firstByte, startMs, timeoutMs)) {
+      return false;
+    }
+
+    if (firstByte != 0x42) {
+      continue;
+    }
+
+    uint8_t secondByte = 0;
+    if (!readByteWithTimeout(pmsSerial, secondByte, startMs, timeoutMs)) {
+      return false;
+    }
+
+    if (secondByte != 0x4D) {
+      continue;
+    }
+
+    frame[0] = firstByte;
+    frame[1] = secondByte;
+
+    for (uint8_t i = 2; i < PMS_FRAME_SIZE; ++i) {
+      if (!readByteWithTimeout(pmsSerial, frame[i], startMs, timeoutMs)) {
+        return false;
+      }
+    }
+
+    if (readU16BE(frame, 2) != PMS_PAYLOAD_LENGTH) {
+      continue;
+    }
+
+    uint16_t checksum = 0;
+    for (uint8_t i = 0; i < PMS_FRAME_SIZE - 2; ++i) {
+      checksum += frame[i];
+    }
+
+    if (checksum != readU16BE(frame, PMS_FRAME_SIZE - 2)) {
+      continue;
+    }
+
+    data.valid = true;
+    data.pm1_0 = readU16BE(frame, 10);  // Atmospheric PM1.0
+    data.pm2_5 = readU16BE(frame, 12);  // Atmospheric PM2.5
+    data.pm10 = readU16BE(frame, 14);   // Atmospheric PM10
+
+    // PMS5003T keeps temperature and humidity at data 11 / data 12.
+    data.temperature = static_cast<int16_t>(readU16BE(frame, 24)) / 10.0f;
+    data.humidity = readU16BE(frame, 26) / 10.0f;
+    return true;
+  }
+
+  return false;
+}
+
+PMS5003TData readPMS5003T() {
+  PMS5003TData latest = {false, 0, 0, 0, 0.0f, 0.0f};
+  uint32_t startMs = millis();
+
+  do {
+    uint32_t elapsedMs = millis() - startMs;
+    if (elapsedMs >= PMS_READ_TIMEOUT_MS) {
+      break;
+    }
+
+    PMS5003TData candidate = {false, 0, 0, 0, 0.0f, 0.0f};
+    if (!readPMSFrame(candidate, PMS_READ_TIMEOUT_MS - elapsedMs)) {
+      break;
+    }
+
+    latest = candidate;
+  } while (pmsSerial.available() >= PMS_FRAME_SIZE);
+
+  return latest;
+}
+
+void beginWiFi() {
+  if (!wifiConfigLooksValid()) {
+    Serial.println("# WiFi/MQTT skipped: update WIFI_SSID and MQTT_SERVER first");
+    return;
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  lastWiFiAttemptMs = millis();
+  Serial.print("# WiFi connecting to ");
+  Serial.println(WIFI_SSID);
+}
+
+void maintainWiFi() {
+  if (!wifiConfigLooksValid() || WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+
+  if (millis() - lastWiFiAttemptMs < WIFI_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  lastWiFiAttemptMs = millis();
+  Serial.println("# WiFi reconnecting");
+  WiFi.disconnect();
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void setupTimeIfNeeded() {
+  if (!wifiConfigLooksValid() || timeConfigured || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  configTime(0, 0, "pool.ntp.org", "time.google.com", "time.nist.gov");
+
+  time_t now = time(nullptr);
+  uint32_t startedMs = millis();
+  while (now < 1700000000 && millis() - startedMs < 5000UL) {
+    delay(100);
+    now = time(nullptr);
+  }
+
+  timeConfigured = now >= 1700000000;
+  Serial.println(timeConfigured ? "# NTP time synced" : "# NTP time not ready");
+}
+
+uint32_t currentTimestampSeconds() {
+  time_t now = time(nullptr);
+  if (timeConfigured && now >= 1700000000) {
+    return static_cast<uint32_t>(now);
+  }
+  return millis() / 1000UL;
+}
+
+void maintainMQTT() {
+  if (!wifiConfigLooksValid() || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  setupTimeIfNeeded();
+
+  if (mqtt.connected()) {
+    mqtt.loop();
+    return;
+  }
+
+  if (millis() - lastMQTTAttemptMs < MQTT_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  lastMQTTAttemptMs = millis();
+  Serial.print("# MQTT connecting to ");
+  Serial.print(MQTT_SERVER);
+  Serial.print(':');
+  Serial.println(MQTT_PORT);
+
+  if (mqtt.connect(NODE_ID)) {
+    Serial.println("# MQTT connected");
+  } else {
+    Serial.print("# MQTT failed, state=");
+    Serial.println(mqtt.state());
+  }
+}
+
+void warmupSensors() {
+  Serial.print("# MQ warmup seconds=");
+  Serial.println(MQ_WARMUP_MS / 1000UL);
+
+  uint32_t startedMs = millis();
+  uint32_t lastPrintMs = startedMs;
+
+  while (millis() - startedMs < MQ_WARMUP_MS) {
+    maintainWiFi();
+    maintainMQTT();
+
+    if (millis() - lastPrintMs >= 5000UL) {
+      lastPrintMs = millis();
+      uint32_t remainingMs = MQ_WARMUP_MS - (millis() - startedMs);
+      Serial.print("# warmup remaining seconds=");
+      Serial.println((remainingMs + 999UL) / 1000UL);
+    }
+
+    delay(20);
+  }
+
+  drainPMSInput();
+  Serial.println("# warmup done");
+}
+
+void addPMSJsonFields(JsonObject doc, const PMS5003TData &pms) {
+  if (pms.valid) {
+    doc["pm1_0"] = pms.pm1_0;
+    doc["pm2_5"] = pms.pm2_5;
+    doc["pm10"] = pms.pm10;
+    doc["temperature"] = pms.temperature;
+    doc["humidity"] = pms.humidity;
+  } else {
+    doc["pm1_0"] = nullptr;
+    doc["pm2_5"] = nullptr;
+    doc["pm10"] = nullptr;
+    doc["temperature"] = nullptr;
+    doc["humidity"] = nullptr;
+  }
+  doc["pms_valid"] = pms.valid;
+}
+
+void sampleAndPublish() {
+  uint16_t vocRaw = readADCAverage(MQ135_PIN);
+  uint16_t coRaw = readADCAverage(MQ7_PIN);
+  uint16_t vocMilliVolt = readMilliVoltAverage(MQ135_PIN);
+  uint16_t coMilliVolt = readMilliVoltAverage(MQ7_PIN);
+  PMS5003TData pms = readPMS5003T();
+
+  StaticJsonDocument<384> doc;
+  JsonObject root = doc.to<JsonObject>();
+  root["node_id"] = NODE_ID;
+  root["timestamp"] = currentTimestampSeconds();
+  root["voc_raw"] = vocRaw;
+  root["co_raw"] = coRaw;
+  root["voc_mv"] = vocMilliVolt;
+  root["co_mv"] = coMilliVolt;
+  addPMSJsonFields(root, pms);
+
+  char payload[384];
+  size_t payloadLength = serializeJson(root, payload, sizeof(payload));
+  Serial.println(payload);
+
+  if (mqtt.connected()) {
+    bool published = mqtt.publish(mqttTopic, reinterpret_cast<const uint8_t *>(payload),
+                                  payloadLength);
+    if (!published) {
+      Serial.println("# MQTT publish failed");
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(SERIAL_BAUD);
+  delay(300);
+
+  snprintf(mqttTopic, sizeof(mqttTopic), "smokelens/%s/data", NODE_ID);
+
+  setupADC();
+  pmsSerial.setRxBufferSize(512);
+  pmsSerial.begin(PMS_BAUD, SERIAL_8N1, PMS_RX_PIN, PMS_TX_PIN);
+
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  mqtt.setBufferSize(512);
+
+  Serial.println("# SmokeLens node boot");
+  Serial.print("# MQTT topic=");
+  Serial.println(mqttTopic);
+
+  beginWiFi();
+  warmupSensors();
+
+  lastSampleMs = millis() - SAMPLE_INTERVAL_MS;
+}
+
+void loop() {
+  maintainWiFi();
+  maintainMQTT();
+
+  if (millis() - lastSampleMs >= SAMPLE_INTERVAL_MS) {
+    lastSampleMs = millis();
+    sampleAndPublish();
+  }
+
+  mqtt.loop();
+  delay(10);
+}
