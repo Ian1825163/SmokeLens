@@ -70,6 +70,12 @@ Example:
 {
   "node_id": "node_01",
   "timestamp": 1716000000,
+  "mode": "inference",
+  "collection_label": null,
+  "model_version": "rule_fallback_v0",
+  "inference_class": "normal_air",
+  "cigarette_detected": false,
+  "inference_score": 0.0,
   "voc_raw": 620,
   "co_raw": 681,
   "voc_mv": 502,
@@ -79,7 +85,14 @@ Example:
   "pm10": 1,
   "temperature": 21.2,
   "humidity": 68.2,
-  "pms_valid": true
+  "pms_valid": true,
+  "buttons": {
+    "mode_data_collection": false,
+    "cooking_fume": false,
+    "vehicle_exhaust": false,
+    "cigarette_smoke": false,
+    "led_cigarette": false
+  }
 }
 ```
 
@@ -230,6 +243,31 @@ Current wiring:
 | PMS5003T TXD | GPIO 16 / RXD2 |
 | PMS5003T RXD | Not connected |
 | PMS5003T SET/RST | 3.3V |
+
+Button/LED wiring for mode control:
+
+| Control | ESP32 Pin | HIGH / Pull Up | LOW / Pull Down |
+| --- | --- | --- | --- |
+| Button 1 | GPIO 32 | Data collection mode | Inference mode |
+| Button 3 | GPIO 33 | Label: `cooking_fume` | Label: `normal_air` |
+| Button 5 | GPIO 25 | Label: `vehicle_exhaust` | Label: `normal_air` |
+| Button 8 | GPIO 26 | Label: `cigarette_smoke` | Label: `normal_air` |
+| LED 1 | GPIO 2 by default | On when cigarette detected in inference mode | Off |
+
+The button pins use ESP32 internal pulldown mode. A HIGH state means the button
+input is connected to 3.3V. If LED 1 is wired to another pin, change
+`CIGARETTE_LED_PIN` in `SmokeLens.ino`.
+
+Mode behavior:
+
+- Default after power-on is inference mode because GPIO32 is pulled down.
+- In inference mode, ESP32 sends raw sensor data plus inference output.
+- In data collection mode, ESP32 sends raw sensor data plus the selected label.
+- Label priority, if multiple label buttons are HIGH, is cigarette > vehicle exhaust > cooking fume > normal.
+
+Current firmware inference uses `rule_fallback_v0` thresholds until trained
+model parameters are exported into firmware. The JSON field layout is already
+prepared for the final trained model output.
 
 Before MQTT is ready, it is okay to leave this in `arduino_secrets.h`:
 
@@ -681,6 +719,12 @@ Important fields:
 | --- | --- |
 | `node_id` | Sensor node name, for example `node_01` |
 | `timestamp` | ESP32 timestamp |
+| `mode` | `inference` or `data_collection` |
+| `collection_label` | Data collection label, for example `normal_air` or `cigarette_smoke` |
+| `inference_class` | Firmware inference result in inference mode |
+| `cigarette_detected` | Boolean alert result from firmware inference |
+| `inference_score` | Firmware inference score |
+| `model_version` | Firmware model/version string |
 | `voc_raw` | MQ-135 ADC raw value |
 | `co_raw` | MQ-7 ADC raw value |
 | `voc_mv` | MQ-135 estimated ADC millivolts |

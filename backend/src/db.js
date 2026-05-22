@@ -32,7 +32,9 @@ function toApiRow(row) {
 
   return {
     ...row,
-    pms_valid: row.pms_valid === null ? null : Boolean(row.pms_valid)
+    pms_valid: row.pms_valid === null ? null : Boolean(row.pms_valid),
+    cigarette_detected:
+      row.cigarette_detected === null ? null : Boolean(row.cigarette_detected)
   };
 }
 
@@ -64,6 +66,15 @@ function queryOne(db, sql, params = []) {
   return queryAll(db, sql, params)[0] || null;
 }
 
+function ensureColumn(db, tableName, columnName, definition) {
+  const columns = queryAll(db, `PRAGMA table_info(${tableName})`).map(
+    (column) => column.name
+  );
+  if (!columns.includes(columnName)) {
+    db.run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
 async function openDatabase(config) {
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 
@@ -87,6 +98,12 @@ async function openDatabase(config) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       node_id TEXT NOT NULL,
       timestamp INTEGER NOT NULL,
+      mode TEXT,
+      collection_label TEXT,
+      inference_class TEXT,
+      cigarette_detected INTEGER,
+      inference_score REAL,
+      model_version TEXT,
       voc_raw INTEGER,
       co_raw INTEGER,
       voc_mv INTEGER,
@@ -109,6 +126,13 @@ async function openDatabase(config) {
     CREATE INDEX IF NOT EXISTS idx_readings_received_at
       ON readings(received_at);
   `);
+
+  ensureColumn(db, "readings", "mode", "TEXT");
+  ensureColumn(db, "readings", "collection_label", "TEXT");
+  ensureColumn(db, "readings", "inference_class", "TEXT");
+  ensureColumn(db, "readings", "cigarette_detected", "INTEGER");
+  ensureColumn(db, "readings", "inference_score", "REAL");
+  ensureColumn(db, "readings", "model_version", "TEXT");
   persist();
 
   function saveReading(input) {
@@ -116,6 +140,14 @@ async function openDatabase(config) {
       node_id: String(input.node_id || "unknown"),
       timestamp:
         nullableInteger(input.timestamp) || Math.floor(Date.now() / 1000),
+      mode: input.mode ? String(input.mode) : null,
+      collection_label: input.collection_label
+        ? String(input.collection_label)
+        : null,
+      inference_class: input.inference_class ? String(input.inference_class) : null,
+      cigarette_detected: booleanToInteger(input.cigarette_detected),
+      inference_score: nullableNumber(input.inference_score),
+      model_version: input.model_version ? String(input.model_version) : null,
       voc_raw: nullableInteger(input.voc_raw),
       co_raw: nullableInteger(input.co_raw),
       voc_mv: nullableInteger(input.voc_mv),
@@ -136,6 +168,12 @@ async function openDatabase(config) {
         INSERT INTO readings (
           node_id,
           timestamp,
+          mode,
+          collection_label,
+          inference_class,
+          cigarette_detected,
+          inference_score,
+          model_version,
           voc_raw,
           co_raw,
           voc_mv,
@@ -149,11 +187,17 @@ async function openDatabase(config) {
           classification,
           raw_payload,
           received_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         reading.node_id,
         reading.timestamp,
+        reading.mode,
+        reading.collection_label,
+        reading.inference_class,
+        reading.cigarette_detected,
+        reading.inference_score,
+        reading.model_version,
         reading.voc_raw,
         reading.co_raw,
         reading.voc_mv,

@@ -176,7 +176,7 @@ async function main() {
 
     const saved = store.saveReading(reading);
     console.log(
-      `[data] ${saved.node_id} ts=${saved.timestamp} voc=${saved.voc_raw} co=${saved.co_raw} pm25=${saved.pm2_5} pms=${saved.pms_valid}`
+      `[data] ${saved.node_id} mode=${saved.mode} label=${saved.collection_label || "-"} infer=${saved.inference_class || "-"} ts=${saved.timestamp} voc=${saved.voc_raw} co=${saved.co_raw} pm25=${saved.pm2_5} pms=${saved.pms_valid}`
     );
 
     broadcast(wss, {

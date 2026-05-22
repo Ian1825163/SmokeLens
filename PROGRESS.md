@@ -1,6 +1,12 @@
-# SmokeLens Next Session Plan
+# SmokeLens Feature Branch Plan
 
-Updated: 2026-05-15
+Updated: 2026-05-22
+
+Current branch:
+
+```text
+feature/esp32-button-modes
+```
 
 This file is the handoff plan for the next work session. Follow the steps from
 top to bottom to continue without reconstructing today's context.
@@ -25,6 +31,13 @@ Completed today:
 - `data/smokelens.sqlite` was created successfully.
 - WiFi/MQTT secrets were moved out of `SmokeLens.ino` into ignored `arduino_secrets.h`.
 - `arduino_secrets.example.h` was added as the committed template.
+
+New feature work started:
+
+- Added ESP32 button-controlled mode switching.
+- Added firmware JSON fields for data collection labels and inference output.
+- Added LED 1 alert output for cigarette detection in inference mode.
+- Added backend database/CSV columns for mode, labels, inference class, score, and model version.
 
 Important local-only files:
 
@@ -83,6 +96,30 @@ Backend:
 Data:
 
 - generated DB: `data/smokelens.sqlite`
+
+## 2.1 Button/LED Mapping
+
+| Control | ESP32 Pin | HIGH / Pull Up | LOW / Pull Down |
+| --- | --- | --- | --- |
+| Button 1 | GPIO 32 | Data collection | Inference |
+| Button 3 | GPIO 33 | Oil/cooking fume label | Normal air |
+| Button 5 | GPIO 25 | Vehicle exhaust label | Normal air |
+| Button 8 | GPIO 26 | Cigarette label | Normal air |
+| LED 1 | GPIO 2 default | Cigarette detected in inference mode | Off |
+
+If multiple label buttons are HIGH, current priority is:
+
+```text
+cigarette_smoke > vehicle_exhaust > cooking_fume > normal_air
+```
+
+Current inference model:
+
+```text
+rule_fallback_v0
+```
+
+This is a placeholder until trained model parameters are exported to firmware.
 
 ## 3. Start-Of-Session Checklist
 
@@ -205,13 +242,13 @@ Expected Serial:
 Expected JSON:
 
 ```json
-{"node_id":"node_01","timestamp":1716000000,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
+{"node_id":"node_01","timestamp":1716000000,"mode":"inference","collection_label":null,"model_version":"rule_fallback_v0","inference_class":"normal_air","cigarette_detected":false,"inference_score":0,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
 ```
 
 Expected backend log:
 
 ```text
-[data] node_01 ts=... voc=... co=... pm25=... pms=true
+[data] node_01 mode=inference label=- infer=normal_air ts=... voc=... co=... pm25=... pms=true
 ```
 
 ## 7. Verify API And Database
@@ -273,25 +310,28 @@ New-NetFirewallRule -DisplayName "SmokeLens MQTT 1883" -Direction Inbound -Proto
 
 Do these after the full pipeline is confirmed:
 
-1. Collect 10-20 minutes of normal-air baseline data.
-2. Export CSV and inspect ranges for:
+1. Test button GPIO states in Serial JSON.
+2. Confirm Button 1 switches `mode` between `inference` and `data_collection`.
+3. Confirm Button 3/5/8 produce `collection_label` values in data collection mode.
+4. Confirm LED 1 turns on only in inference mode when `cigarette_detected:true`.
+5. Collect 10-20 minutes of normal-air baseline data.
+6. Export CSV and inspect ranges for:
    - `voc_raw`
    - `co_raw`
    - `pm2_5`
    - temperature/humidity
-3. Add a simple baseline summary endpoint or script.
-4. Add rule-based classification in `backend/src/classifier.js`.
-5. Store classification result per reading.
-6. Build a minimal dashboard page:
+7. Replace `rule_fallback_v0` with trained model parameters once available.
+8. Add a simple baseline summary endpoint or script.
+9. Build a minimal dashboard page:
    - latest values
    - node online/offline
    - simple trend chart
-7. Later collect labeled scenarios:
+10. Later collect labeled scenarios:
    - normal air
    - cigarette smoke or incense substitute
    - cooking fume
    - vehicle exhaust
-8. Then train SVM-RBF from exported CSV.
+11. Then train SVM-RBF from exported CSV.
 
 ## 10. Commit/Push Notes
 

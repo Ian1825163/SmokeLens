@@ -61,6 +61,14 @@ const uint8_t MQ7_PIN = 39;    // CO,  ADC1_CH3, VN
 const int PMS_RX_PIN = 16;  // ESP32 UART2 RX, connect to PMS5003T TX
 const int PMS_TX_PIN = 17;  // Not connected, kept for UART2 init
 
+const uint8_t MODE_BUTTON_PIN = 32;       // HIGH=data collection, LOW=inference
+const uint8_t COOKING_BUTTON_PIN = 33;    // HIGH=cooking fume label
+const uint8_t EXHAUST_BUTTON_PIN = 25;    // HIGH=vehicle exhaust label
+const uint8_t CIGARETTE_BUTTON_PIN = 26;  // HIGH=cigarette smoke label
+
+// Change this if LED 1 is wired to another GPIO.
+const uint8_t CIGARETTE_LED_PIN = 2;
+
 // =========================
 // Runtime constants
 // =========================
@@ -74,6 +82,14 @@ const uint32_t PMS_READ_TIMEOUT_MS = 1500UL;
 const uint8_t ADC_SAMPLE_COUNT = 10;
 const uint16_t PMS_FRAME_SIZE = 32;
 const uint16_t PMS_PAYLOAD_LENGTH = 28;
+
+const char *INFERENCE_MODEL_VERSION = "rule_fallback_v0";
+
+// Placeholder thresholds until trained model parameters are exported to firmware.
+const uint16_t MODEL_VOC_RAW_THRESHOLD = 900;
+const uint16_t MODEL_CO_RAW_THRESHOLD = 800;
+const float MODEL_PM25_THRESHOLD = 25.0f;
+const float MODEL_CIGARETTE_SCORE_THRESHOLD = 0.65f;
 
 HardwareSerial pmsSerial(2);
 WiFiClient wifiClient;
@@ -93,6 +109,108 @@ struct PMS5003TData {
   float temperature;
   float humidity;
 };
+
+enum class NodeMode {
+  Inference,
+  DataCollection
+};
+
+enum class CollectionLabel {
+  NormalAir,
+  CookingFume,
+  VehicleExhaust,
+  CigaretteSmoke
+};
+
+struct ButtonSnapshot {
+  bool dataCollectionMode;
+  bool cookingFume;
+  bool vehicleExhaust;
+  bool cigaretteSmoke;
+};
+
+struct InferenceResult {
+  bool cigaretteDetected;
+  float score;
+  const char *classification;
+};
+
+const char *modeToString(NodeMode mode) {
+  return mode == NodeMode::DataCollection ? "data_collection" : "inference";
+}
+
+const char *labelToString(CollectionLabel label) {
+  switch (label) {
+    case CollectionLabel::CookingFume:
+      return "cooking_fume";
+    case CollectionLabel::VehicleExhaust:
+      return "vehicle_exhaust";
+    case CollectionLabel::CigaretteSmoke:
+      return "cigarette_smoke";
+    case CollectionLabel::NormalAir:
+    default:
+      return "normal_air";
+  }
+}
+
+CollectionLabel selectedCollectionLabel(const ButtonSnapshot &buttons) {
+  if (buttons.cigaretteSmoke) {
+    return CollectionLabel::CigaretteSmoke;
+  }
+  if (buttons.vehicleExhaust) {
+    return CollectionLabel::VehicleExhaust;
+  }
+  if (buttons.cookingFume) {
+    return CollectionLabel::CookingFume;
+  }
+  return CollectionLabel::NormalAir;
+}
+
+void setupButtonsAndLED() {
+  pinMode(MODE_BUTTON_PIN, INPUT_PULLDOWN);
+  pinMode(COOKING_BUTTON_PIN, INPUT_PULLDOWN);
+  pinMode(EXHAUST_BUTTON_PIN, INPUT_PULLDOWN);
+  pinMode(CIGARETTE_BUTTON_PIN, INPUT_PULLDOWN);
+
+  pinMode(CIGARETTE_LED_PIN, OUTPUT);
+  digitalWrite(CIGARETTE_LED_PIN, LOW);
+}
+
+ButtonSnapshot readButtons() {
+  ButtonSnapshot buttons;
+  buttons.dataCollectionMode = digitalRead(MODE_BUTTON_PIN) == HIGH;
+  buttons.cookingFume = digitalRead(COOKING_BUTTON_PIN) == HIGH;
+  buttons.vehicleExhaust = digitalRead(EXHAUST_BUTTON_PIN) == HIGH;
+  buttons.cigaretteSmoke = digitalRead(CIGARETTE_BUTTON_PIN) == HIGH;
+  return buttons;
+}
+
+float normalizedExcess(float value, float threshold) {
+  if (threshold <= 0.0f || value <= threshold) {
+    return 0.0f;
+  }
+  const float excess = (value - threshold) / threshold;
+  return constrain(excess, 0.0f, 1.0f);
+}
+
+InferenceResult runCigaretteInference(uint16_t vocRaw, uint16_t coRaw,
+                                      const PMS5003TData &pms) {
+  const float pm25 = pms.valid ? static_cast<float>(pms.pm2_5) : 0.0f;
+  const float vocScore = normalizedExcess(vocRaw, MODEL_VOC_RAW_THRESHOLD);
+  const float coScore = normalizedExcess(coRaw, MODEL_CO_RAW_THRESHOLD);
+  const float pmScore = normalizedExcess(pm25, MODEL_PM25_THRESHOLD);
+  const float score = (0.45f * vocScore) + (0.35f * coScore) + (0.20f * pmScore);
+
+  InferenceResult result;
+  result.score = score;
+  result.cigaretteDetected =
+      score >= MODEL_CIGARETTE_SCORE_THRESHOLD ||
+      (vocRaw >= MODEL_VOC_RAW_THRESHOLD && coRaw >= MODEL_CO_RAW_THRESHOLD &&
+       pm25 >= MODEL_PM25_THRESHOLD);
+  result.classification =
+      result.cigaretteDetected ? "cigarette_smoke" : "normal_air";
+  return result;
+}
 
 bool wifiConfigLooksValid() {
   return ENABLE_WIFI_MQTT && strlen(WIFI_SSID) > 0 &&
@@ -360,23 +478,53 @@ void addPMSJsonFields(JsonObject doc, const PMS5003TData &pms) {
 }
 
 void sampleAndPublish() {
+  ButtonSnapshot buttons = readButtons();
+  const NodeMode mode =
+      buttons.dataCollectionMode ? NodeMode::DataCollection : NodeMode::Inference;
+  const CollectionLabel collectionLabel = selectedCollectionLabel(buttons);
+
   uint16_t vocRaw = readADCAverage(MQ135_PIN);
   uint16_t coRaw = readADCAverage(MQ7_PIN);
   uint16_t vocMilliVolt = readMilliVoltAverage(MQ135_PIN);
   uint16_t coMilliVolt = readMilliVoltAverage(MQ7_PIN);
   PMS5003TData pms = readPMS5003T();
 
-  StaticJsonDocument<384> doc;
+  InferenceResult inference = runCigaretteInference(vocRaw, coRaw, pms);
+  const bool ledOn =
+      mode == NodeMode::Inference && inference.cigaretteDetected;
+  digitalWrite(CIGARETTE_LED_PIN, ledOn ? HIGH : LOW);
+
+  StaticJsonDocument<768> doc;
   JsonObject root = doc.to<JsonObject>();
   root["node_id"] = NODE_ID;
   root["timestamp"] = currentTimestampSeconds();
+  root["mode"] = modeToString(mode);
+  root["collection_label"] =
+      mode == NodeMode::DataCollection ? labelToString(collectionLabel) : nullptr;
+  root["model_version"] = INFERENCE_MODEL_VERSION;
+  root["inference_class"] =
+      mode == NodeMode::Inference ? inference.classification : nullptr;
+  root["cigarette_detected"] =
+      mode == NodeMode::Inference ? inference.cigaretteDetected : false;
+  if (mode == NodeMode::Inference) {
+    root["inference_score"] = inference.score;
+  } else {
+    root["inference_score"] = nullptr;
+  }
   root["voc_raw"] = vocRaw;
   root["co_raw"] = coRaw;
   root["voc_mv"] = vocMilliVolt;
   root["co_mv"] = coMilliVolt;
   addPMSJsonFields(root, pms);
 
-  char payload[384];
+  JsonObject buttonJson = root.createNestedObject("buttons");
+  buttonJson["mode_data_collection"] = buttons.dataCollectionMode;
+  buttonJson["cooking_fume"] = buttons.cookingFume;
+  buttonJson["vehicle_exhaust"] = buttons.vehicleExhaust;
+  buttonJson["cigarette_smoke"] = buttons.cigaretteSmoke;
+  buttonJson["led_cigarette"] = ledOn;
+
+  char payload[768];
   size_t payloadLength = serializeJson(root, payload, sizeof(payload));
   Serial.println(payload);
 
@@ -396,6 +544,7 @@ void setup() {
   snprintf(mqttTopic, sizeof(mqttTopic), "smokelens/%s/data", NODE_ID);
 
   setupADC();
+  setupButtonsAndLED();
   pmsSerial.setRxBufferSize(512);
   pmsSerial.begin(PMS_BAUD, SERIAL_8N1, PMS_RX_PIN, PMS_TX_PIN);
 
