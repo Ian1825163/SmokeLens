@@ -252,11 +252,10 @@ Button/LED wiring for mode control:
 | Button 3 | GPIO 33 | Label: `cooking_fume` | Label: `normal_air` |
 | Button 5 | GPIO 25 | Label: `vehicle_exhaust` | Label: `normal_air` |
 | Button 8 | GPIO 26 | Label: `cigarette_smoke` | Label: `normal_air` |
-| LED 1 | GPIO 2 by default | On when cigarette detected in inference mode | Off |
+| LED 1 | GPIO 27 | On when cigarette detected in inference mode | Off |
 
 The button pins use ESP32 internal pulldown mode. A HIGH state means the button
-input is connected to 3.3V. If LED 1 is wired to another pin, change
-`CIGARETTE_LED_PIN` in `SmokeLens.ino`.
+input is connected to 3.3V.
 
 Mode behavior:
 
@@ -286,7 +285,7 @@ The test sketch:
 - Reads GPIO32 / GPIO33 / GPIO25 / GPIO26 with `INPUT_PULLDOWN`.
 - Prints a heartbeat every second.
 - Prints a change line whenever a button/switch changes state.
-- Mirrors Button 8 / GPIO26 to LED 1, default `GPIO2`, so LED wiring can be checked.
+- Mirrors Button 8 / GPIO26 to LED 1 on `GPIO27`, so LED wiring can be checked.
 
 Expected behavior:
 

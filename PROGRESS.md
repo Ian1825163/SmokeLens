@@ -106,7 +106,7 @@ Data:
 | Button 3 | GPIO 33 | Oil/cooking fume label | Normal air |
 | Button 5 | GPIO 25 | Vehicle exhaust label | Normal air |
 | Button 8 | GPIO 26 | Cigarette label | Normal air |
-| LED 1 | GPIO 2 default | Cigarette detected in inference mode | Off |
+| LED 1 | GPIO 27 | Cigarette detected in inference mode | Off |
 
 If multiple label buttons are HIGH, current priority is:
 

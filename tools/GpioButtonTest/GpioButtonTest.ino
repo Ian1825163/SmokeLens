@@ -25,7 +25,7 @@ const uint8_t MODE_BUTTON_PIN = 32;       // HIGH=data collection, LOW=inference
 const uint8_t COOKING_BUTTON_PIN = 33;    // HIGH=cooking fume, LOW=normal
 const uint8_t EXHAUST_BUTTON_PIN = 25;    // HIGH=vehicle exhaust, LOW=normal
 const uint8_t CIGARETTE_BUTTON_PIN = 26;  // HIGH=cigarette smoke, LOW=normal
-const uint8_t LED_PIN = 2;                // Change if LED 1 uses another GPIO
+const uint8_t LED_PIN = 27;
 
 struct InputState {
   const char *name;

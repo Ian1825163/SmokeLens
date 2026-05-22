@@ -66,8 +66,7 @@ const uint8_t COOKING_BUTTON_PIN = 33;    // HIGH=cooking fume label
 const uint8_t EXHAUST_BUTTON_PIN = 25;    // HIGH=vehicle exhaust label
 const uint8_t CIGARETTE_BUTTON_PIN = 26;  // HIGH=cigarette smoke label
 
-// Change this if LED 1 is wired to another GPIO.
-const uint8_t CIGARETTE_LED_PIN = 2;
+const uint8_t CIGARETTE_LED_PIN = 27;
 
 // =========================
 // Runtime constants
