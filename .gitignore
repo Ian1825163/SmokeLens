@@ -1,5 +1,7 @@
 .pio/
 .vscode/
+__pycache__/
+*.pyc
 arduino_secrets.h
 *.bin
 *.elf
@@ -13,3 +15,6 @@ data/*.db-*
 data/*.csv
 data/*.jsonl
 data/mosquitto/
+ml/datasets/*.csv
+ml/models/*.joblib
+ml/models/*.json
