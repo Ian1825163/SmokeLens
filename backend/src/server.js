@@ -34,7 +34,11 @@ function buildReading(topic, payloadBuffer) {
     received_at: Date.now()
   };
 
-  if (!reading.classification) {
+  if (
+    reading.classification === null ||
+    reading.classification === undefined ||
+    reading.classification === ""
+  ) {
     reading.classification = classifyReading(reading);
   }
 

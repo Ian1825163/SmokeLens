@@ -25,6 +25,14 @@ function booleanToInteger(value) {
   return null;
 }
 
+function nullableClassIndex(value) {
+  const number = nullableInteger(value);
+  if (number === null || number < 0 || number > 3) {
+    return null;
+  }
+  return number;
+}
+
 function toApiRow(row) {
   if (!row) {
     return null;
@@ -97,7 +105,7 @@ async function openDatabase(config) {
       temperature REAL,
       humidity REAL,
       pms_valid INTEGER,
-      classification TEXT DEFAULT 'unclassified',
+      classification INTEGER,
       raw_payload TEXT NOT NULL,
       received_at INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -126,7 +134,7 @@ async function openDatabase(config) {
       temperature: nullableNumber(input.temperature),
       humidity: nullableNumber(input.humidity),
       pms_valid: booleanToInteger(input.pms_valid),
-      classification: input.classification || "unclassified",
+      classification: nullableClassIndex(input.classification),
       raw_payload: input.raw_payload || "{}",
       received_at: input.received_at || Date.now()
     };

@@ -1,6 +1,6 @@
 # SmokeLens Next Session Plan
 
-Updated: 2026-05-15
+Updated: 2026-05-22
 
 This file is the handoff plan for the next work session. Follow the steps from
 top to bottom to continue without reconstructing today's context.
@@ -25,12 +25,53 @@ Completed today:
 - `data/smokelens.sqlite` was created successfully.
 - WiFi/MQTT secrets were moved out of `SmokeLens.ino` into ignored `arduino_secrets.h`.
 - `arduino_secrets.example.h` was added as the committed template.
+- ML work is now on the `ml` branch.
+- Python ML scripts were added under `ml/`:
+  - `ml/scripts/prepare_dataset.py`
+  - `ml/scripts/train_mlp.py`
+  - `ml/requirements-ml.txt`
+  - `ml/README.md`
+- A local Python virtual environment was created at `.env/` and is ignored by git.
+- ML dependencies were installed in `.env/`:
+  - `scikit-learn`
+  - `joblib`
+  - `numpy`
+  - `scipy`
+- MLP input was defined as 9 dimensions:
+  - `voc_raw`
+  - `co_raw`
+  - `voc_mv`
+  - `co_mv`
+  - `pm1_0`
+  - `pm2_5`
+  - `pm10`
+  - `temperature`
+  - `humidity`
+- `pms_valid` is kept in the database but is not an MLP input. Rows with
+  `pms_valid != 1` should be excluded from training.
+- Classification labels were changed to integer classes:
+  - `0` = normal air
+  - `1` = cooking oil fume
+  - `2` = car exhaust
+  - `3` = smoke smell
+  - `NULL` = unlabeled
+- Backend classification storage was changed from text labels such as
+  `unclassified` to integer classes `0`-`3` or `NULL`.
+- The planned MLP architecture is currently:
+  - input: 9
+  - hidden layers: `32,16`
+  - output classes: 4
+  - normalization: `StandardScaler` in the Python training pipeline
 
 Important local-only files:
 
 - `arduino_secrets.h` contains local WiFi/MQTT values and is ignored by git.
 - `backend/.env` contains local backend settings and is ignored by git.
 - `data/smokelens.sqlite` is generated data and is ignored by git.
+- `.env/` contains the local Python virtual environment and is ignored by git.
+- `ml/datasets/*.csv` contains generated train/test CSV files and is ignored by git.
+- `ml/models/*.joblib` and `ml/models/*.json` contain trained model artifacts
+  and are ignored by git for now.
 
 ## 1. Current Architecture
 
@@ -83,6 +124,23 @@ Backend:
 Data:
 
 - generated DB: `data/smokelens.sqlite`
+
+ML:
+
+- `ml/README.md`
+- `ml/requirements-ml.txt`
+- `ml/scripts/prepare_dataset.py`
+- `ml/scripts/train_mlp.py`
+- generated train/test CSV: `ml/datasets/train.csv`, `ml/datasets/test.csv`
+- generated model artifacts:
+  - `ml/models/smokelens_mlp.joblib`
+  - `ml/models/smokelens_mlp_metadata.json`
+
+Current ML branch:
+
+```text
+ml
+```
 
 ## 3. Start-Of-Session Checklist
 
@@ -273,25 +331,71 @@ New-NetFirewallRule -DisplayName "SmokeLens MQTT 1883" -Direction Inbound -Proto
 
 Do these after the full pipeline is confirmed:
 
-1. Collect 10-20 minutes of normal-air baseline data.
-2. Export CSV and inspect ranges for:
+1. Add a labeling workflow for SQLite rows.
+   - Need a script or API to mark time ranges with `classification = 0..3`.
+   - Suggested classes:
+     - `0` = normal air
+     - `1` = cooking oil fume
+     - `2` = car exhaust
+     - `3` = smoke smell
+2. Collect labeled data for each class.
+   - Keep each experiment sequence clear, for example:
+     - normal air
+     - exposure state
+     - recovery back to normal air
+3. Export/prepare train and test data:
+
+```bash
+.env/bin/python ml/scripts/prepare_dataset.py
+```
+
+This reads `data/smokelens.sqlite`, filters rows where:
+
+- `pms_valid = 1`
+- `classification` is one of `0`, `1`, `2`, `3`
+- all 9 MLP input features are non-null
+
+Then it writes:
+
+```text
+ml/datasets/train.csv
+ml/datasets/test.csv
+```
+
+4. Train the MLP:
+
+```bash
+.env/bin/python ml/scripts/train_mlp.py
+```
+
+This writes:
+
+```text
+ml/models/smokelens_mlp.joblib
+ml/models/smokelens_mlp_metadata.json
+```
+
+5. Inspect ranges and class balance for:
    - `voc_raw`
    - `co_raw`
+   - `voc_mv`
+   - `co_mv`
+   - `pm1_0`
    - `pm2_5`
-   - temperature/humidity
-3. Add a simple baseline summary endpoint or script.
-4. Add rule-based classification in `backend/src/classifier.js`.
-5. Store classification result per reading.
+   - `pm10`
+   - `temperature`
+   - `humidity`
 6. Build a minimal dashboard page:
    - latest values
    - node online/offline
    - simple trend chart
-7. Later collect labeled scenarios:
-   - normal air
-   - cigarette smoke or incense substitute
-   - cooking fume
-   - vehicle exhaust
-8. Then train SVM-RBF from exported CSV.
+7. After a stable demo model exists, optionally commit one named model artifact,
+   for example `smokelens_mlp_demo_v1.joblib`.
+8. Later add an export script to convert the trained MLP into an Arduino header:
+   - scaler mean/std arrays
+   - dense layer weight arrays
+   - dense layer bias arrays
+   - ESP32 inference helper
 
 ## 10. Commit/Push Notes
 
@@ -310,6 +414,10 @@ Files that should not be committed:
 - `backend/.env`
 - `backend/node_modules/`
 - `data/*.sqlite`
+- `.env/`
+- `ml/datasets/*.csv`
+- `ml/models/*.joblib`
+- `ml/models/*.json`
 - `.pio/`
 
 Before push:

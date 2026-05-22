@@ -25,11 +25,11 @@ FEATURE_COLUMNS = [
     "humidity",
 ]
 
-LABEL_TO_INDEX = {
-    "normal": 0,
-    "cooking_oil": 1,
-    "car_exhaust": 2,
-    "smoke_smell": 3,
+INDEX_TO_LABEL = {
+    0: "normal",
+    1: "cooking_oil",
+    2: "car_exhaust",
+    3: "smoke_smell",
 }
 
 OUTPUT_COLUMNS = FEATURE_COLUMNS + ["label", "label_index"]
@@ -61,11 +61,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def normalize_label(value: object) -> str | None:
+def normalize_classification(value: object) -> tuple[str, int] | None:
     if value is None:
         return None
-    label = str(value).strip().lower()
-    return label if label in LABEL_TO_INDEX else None
+    try:
+        label_index = int(value)
+    except (TypeError, ValueError):
+        return None
+    label = INDEX_TO_LABEL.get(label_index)
+    if label is None:
+        return None
+    return label, label_index
 
 
 def row_is_complete(row: sqlite3.Row) -> bool:
@@ -86,13 +92,14 @@ def load_rows(db_path: Path) -> list[dict[str, object]]:
         connection.row_factory = sqlite3.Row
         rows = []
         for row in connection.execute(query):
-            label = normalize_label(row["classification"])
-            if label is None or not row_is_complete(row):
+            classification = normalize_classification(row["classification"])
+            if classification is None or not row_is_complete(row):
                 continue
 
+            label, label_index = classification
             output_row = {column: row[column] for column in FEATURE_COLUMNS}
             output_row["label"] = label
-            output_row["label_index"] = LABEL_TO_INDEX[label]
+            output_row["label_index"] = label_index
             rows.append(output_row)
 
     return rows
@@ -145,8 +152,9 @@ def main() -> None:
     rows = load_rows(args.db)
     if not rows:
         raise SystemExit(
-            "No usable labeled rows found. Set readings.classification to one "
-            "of: normal, cooking_oil, car_exhaust, smoke_smell."
+            "No usable labeled rows found. Set readings.classification to an "
+            "integer class: 0=normal, 1=cooking_oil, 2=car_exhaust, "
+            "3=smoke_smell."
         )
 
     train_rows, test_rows = stratified_split(rows, args.test_size, args.seed)

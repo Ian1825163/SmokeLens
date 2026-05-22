@@ -691,7 +691,7 @@ Important fields:
 | `temperature` | PMS5003T temperature |
 | `humidity` | PMS5003T relative humidity |
 | `pms_valid` | Whether PMS frame passed validation |
-| `classification` | Currently `unclassified` |
+| `classification` | Integer class: `0` normal, `1` cooking oil, `2` car exhaust, `3` smoke smell; `NULL` when unlabeled |
 | `raw_payload` | Original ESP32 JSON |
 | `received_at` | Laptop receive time in milliseconds |
 

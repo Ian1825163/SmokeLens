@@ -53,8 +53,7 @@ python3 ml/scripts/prepare_dataset.py --db data/smokelens.sqlite --out-dir ml/da
 
 Rows are usable only when:
 
-- `classification` is one of `normal`, `cooking_oil`, `car_exhaust`,
-  `smoke_smell`
+- `classification` is one of `0`, `1`, `2`, `3`
 - `pms_valid` is true
 - all 9 input features are present
 
@@ -70,4 +69,3 @@ This trains a scikit-learn MLP with feature standardization and writes:
 ml/models/smokelens_mlp.joblib
 ml/models/smokelens_mlp_metadata.json
 ```
-
