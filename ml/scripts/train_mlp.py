@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a 9-input, 4-output MLP classifier for SmokeLens readings."""
+"""Train a 7-input, 4-output MLP classifier for SmokeLens readings."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 FEATURE_COLUMNS = [
-    "voc_raw",
-    "co_raw",
     "voc_mv",
     "co_mv",
     "pm1_0",
@@ -48,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--hidden-layers",
-        default="32,16",
+        default="16",
         help="Comma-separated hidden layer sizes.",
     )
     parser.add_argument("--max-iter", default=500, type=int)

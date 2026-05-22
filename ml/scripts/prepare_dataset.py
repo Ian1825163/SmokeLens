@@ -14,8 +14,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 FEATURE_COLUMNS = [
-    "voc_raw",
-    "co_raw",
     "voc_mv",
     "co_mv",
     "pm1_0",
@@ -32,7 +30,7 @@ INDEX_TO_LABEL = {
     3: "smoke_smell",
 }
 
-OUTPUT_COLUMNS = FEATURE_COLUMNS + ["label", "label_index"]
+OUTPUT_COLUMNS = FEATURE_COLUMNS + ["label_index", "label"]
 
 
 def parse_args() -> argparse.Namespace:

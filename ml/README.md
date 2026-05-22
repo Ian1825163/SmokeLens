@@ -15,8 +15,6 @@ Classes:
 Input features:
 
 ```text
-voc_raw
-co_raw
 voc_mv
 co_mv
 pm1_0
@@ -25,6 +23,10 @@ pm10
 temperature
 humidity
 ```
+
+`voc_raw` and `co_raw` are still stored in SQLite for debugging, but they are
+not used for MLP training because they are redundant with the calibrated
+millivolt features.
 
 `pms_valid` is not used as a model input. Rows with invalid PMS data are
 filtered out before training.
@@ -55,7 +57,7 @@ Rows are usable only when:
 
 - `classification` is one of `0`, `1`, `2`, `3`
 - `pms_valid` is true
-- all 9 input features are present
+- all 7 input features are present
 
 ## Train MLP
 
@@ -63,7 +65,18 @@ Rows are usable only when:
 python3 ml/scripts/train_mlp.py
 ```
 
-This trains a scikit-learn MLP with feature standardization and writes:
+This trains a scikit-learn MLP with feature standardization. The default model
+shape is:
+
+```text
+7 -> 16 -> 4
+```
+
+If train accuracy is high but test accuracy is low, reduce model size or add
+more diverse data. If train accuracy is low, increase model size, for example
+with `--hidden-layers 32,16`.
+
+The script writes:
 
 ```text
 ml/models/smokelens_mlp.joblib

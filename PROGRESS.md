@@ -37,9 +37,10 @@ Completed today:
   - `joblib`
   - `numpy`
   - `scipy`
-- MLP input was defined as 9 dimensions:
-  - `voc_raw`
-  - `co_raw`
+- MLP input was changed from 9 to 7 dimensions. `voc_raw` and `co_raw` are
+  still stored in SQLite for debugging, but ML training keeps the millivolt
+  versions to avoid redundant raw/mV pairs.
+  Current MLP input features:
   - `voc_mv`
   - `co_mv`
   - `pm1_0`
@@ -58,10 +59,25 @@ Completed today:
 - Backend classification storage was changed from text labels such as
   `unclassified` to integer classes `0`-`3` or `NULL`.
 - The planned MLP architecture is currently:
-  - input: 9
-  - hidden layers: `32,16`
+  - input: 7
+  - hidden layers: `16`
   - output classes: 4
   - normalization: `StandardScaler` in the Python training pipeline
+- Dataset CSV column order is:
+  - 7 input features
+  - `label_index`
+  - `label`
+- `label_index` is the model target. `label` is kept as the final column for
+  human-readable inspection.
+- A local fake database was created for pipeline testing:
+  - `data/smokelens_fake.sqlite`
+  - 80 usable rows
+  - 20 rows per class
+  - ignored by git
+- Fake generated `ml/datasets/train.csv` and `ml/datasets/test.csv` are also
+  ignored by git. The real default input for `prepare_dataset.py` remains
+  `data/smokelens.sqlite`; use `--db data/smokelens_fake.sqlite` only for local
+  testing.
 
 Important local-only files:
 
@@ -353,7 +369,7 @@ This reads `data/smokelens.sqlite`, filters rows where:
 
 - `pms_valid = 1`
 - `classification` is one of `0`, `1`, `2`, `3`
-- all 9 MLP input features are non-null
+- all 7 MLP input features are non-null
 
 Then it writes:
 
@@ -361,6 +377,15 @@ Then it writes:
 ml/datasets/train.csv
 ml/datasets/test.csv
 ```
+
+CSV format:
+
+```text
+voc_mv,co_mv,pm1_0,pm2_5,pm10,temperature,humidity,label_index,label
+```
+
+`label_index` is used by training. `label` is for human inspection and should
+stay as the final column.
 
 4. Train the MLP:
 
@@ -376,8 +401,6 @@ ml/models/smokelens_mlp_metadata.json
 ```
 
 5. Inspect ranges and class balance for:
-   - `voc_raw`
-   - `co_raw`
    - `voc_mv`
    - `co_mv`
    - `pm1_0`
