@@ -100,12 +100,12 @@ Data:
 
 ## 2.1 Button/LED Mapping
 
-| Control | ESP32 Pin | HIGH / Pull Up | LOW / Pull Down |
+| Control | ESP32 Pin | Open / pullup | Connected to GND |
 | --- | --- | --- | --- |
-| Button 1 | GPIO 32 | Data collection | Inference |
-| Button 3 | GPIO 33 | Oil/cooking fume label | Normal air |
-| Button 5 | GPIO 25 | Vehicle exhaust label | Normal air |
-| Button 8 | GPIO 26 | Cigarette label | Normal air |
+| Button 1 | GPIO 32 | Inference | Data collection |
+| Button 3 | GPIO 33 | Normal air | Oil/cooking fume label |
+| Button 5 | GPIO 25 | Normal air | Vehicle exhaust label |
+| Button 8 | GPIO 26 | Normal air | Cigarette label |
 | LED 1 | GPIO 27 | Cigarette detected in inference mode | Off |
 
 If multiple label buttons are HIGH, current priority is:
@@ -138,13 +138,12 @@ Arduino IDE setup:
 
 Expected:
 
-- GPIO32 HIGH prints `mode=data_collection`.
-- GPIO32 LOW prints `mode=inference`.
-- GPIO33 HIGH prints `label=cooking_fume`.
-- GPIO25 HIGH prints `label=vehicle_exhaust`.
-- GPIO26 HIGH prints `label=cigarette_smoke`.
-- GPIO26 HIGH also turns LED 1 on in the test sketch.
-- All label inputs LOW prints `label=normal_air`.
+- GPIO32 connected to GND prints `mode=data_collection` and turns LED 1 on.
+- GPIO32 open prints `mode=inference` and turns LED 1 off.
+- GPIO33 connected to GND prints `label=cooking_fume`.
+- GPIO25 connected to GND prints `label=vehicle_exhaust`.
+- GPIO26 connected to GND prints `label=cigarette_smoke`.
+- All label inputs open prints `label=normal_air`.
 
 ## 3. Start-Of-Session Checklist
 

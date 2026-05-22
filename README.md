@@ -248,18 +248,19 @@ Button/LED wiring for mode control:
 
 | Control | ESP32 Pin | HIGH / Pull Up | LOW / Pull Down |
 | --- | --- | --- | --- |
-| Button 1 | GPIO 32 | Data collection mode | Inference mode |
-| Button 3 | GPIO 33 | Label: `cooking_fume` | Label: `normal_air` |
-| Button 5 | GPIO 25 | Label: `vehicle_exhaust` | Label: `normal_air` |
-| Button 8 | GPIO 26 | Label: `cigarette_smoke` | Label: `normal_air` |
+| Button 1 | GPIO 32 | Open / inactive | GND = Data collection mode |
+| Button 3 | GPIO 33 | Open / inactive | GND = Label: `cooking_fume` |
+| Button 5 | GPIO 25 | Open / inactive | GND = Label: `vehicle_exhaust` |
+| Button 8 | GPIO 26 | Open / inactive | GND = Label: `cigarette_smoke` |
 | LED 1 | GPIO 27 | On when cigarette detected in inference mode | Off |
 
-The button pins use ESP32 internal pulldown mode. A HIGH state means the button
-input is connected to 3.3V.
+The button pins use ESP32 internal pullup mode. A connected-to-GND state means
+active and is reported as `1`; open/not connected to GND means inactive and is
+reported as `0`.
 
 Mode behavior:
 
-- Default after power-on is inference mode because GPIO32 is pulled down.
+- Default after power-on is inference mode because GPIO32 is pulled up/open.
 - In inference mode, ESP32 sends raw sensor data plus inference output.
 - In data collection mode, ESP32 sends raw sensor data plus the selected label.
 - Label priority, if multiple label buttons are HIGH, is cigarette > vehicle exhaust > cooking fume > normal.
@@ -282,24 +283,25 @@ Monitor should be set to `115200 baud`.
 
 The test sketch:
 
-- Reads GPIO32 / GPIO33 / GPIO25 / GPIO26 with `INPUT_PULLDOWN`.
+- Reads GPIO32 / GPIO33 / GPIO25 / GPIO26 with `INPUT_PULLUP`.
 - Prints a heartbeat every second.
 - Prints a change line whenever a button/switch changes state.
-- Mirrors Button 8 / GPIO26 to LED 1 on `GPIO27`, so LED wiring can be checked.
+- Prints `1` when an input is connected to GND, otherwise `0`.
+- Mirrors Button 1 / GPIO32 to LED 1 on `GPIO27`, so mode switch and LED wiring can be checked.
 
 Expected behavior:
 
 ```text
-GPIO32 HIGH -> mode=data_collection
-GPIO32 LOW  -> mode=inference
-GPIO33 HIGH -> label=cooking_fume
-GPIO25 HIGH -> label=vehicle_exhaust
-GPIO26 HIGH -> label=cigarette_smoke and LED on
-all label buttons LOW -> label=normal_air
+GPIO32 connected to GND -> mode=data_collection and LED on
+GPIO32 open             -> mode=inference and LED off
+GPIO33 connected to GND -> label=cooking_fume
+GPIO25 connected to GND -> label=vehicle_exhaust
+GPIO26 connected to GND -> label=cigarette_smoke
+all label buttons open  -> label=normal_air
 ```
 
-Important: button inputs must use `3.3V` for HIGH. Do not feed ESP32 GPIO pins
-with `5V`.
+Important: this wiring style connects GPIO to `GND` only. Do not feed ESP32
+GPIO pins with `5V`.
 
 Before MQTT is ready, it is okay to leave this in `arduino_secrets.h`:
 

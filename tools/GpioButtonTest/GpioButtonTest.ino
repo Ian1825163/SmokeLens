@@ -9,10 +9,10 @@
   - Verify LED 1 output can be driven.
 
   Wiring expectation:
-  - Each button/switch output goes to the ESP32 GPIO pin.
-  - LOW means connected to GND or left low by the internal pulldown.
-  - HIGH means connected to 3.3V.
-  - Do not connect any GPIO input to 5V.
+  - Each button/switch connects the ESP32 GPIO pin to GND when ON.
+  - The sketch uses INPUT_PULLUP.
+  - Connected to GND = active = prints 1.
+  - Open/not connected to GND = inactive = prints 0.
 */
 
 #include <Arduino.h>
@@ -21,10 +21,10 @@ const uint32_t SERIAL_BAUD = 115200;
 const uint32_t PRINT_INTERVAL_MS = 1000;
 const uint32_t DEBOUNCE_MS = 30;
 
-const uint8_t MODE_BUTTON_PIN = 32;       // HIGH=data collection, LOW=inference
-const uint8_t COOKING_BUTTON_PIN = 33;    // HIGH=cooking fume, LOW=normal
-const uint8_t EXHAUST_BUTTON_PIN = 25;    // HIGH=vehicle exhaust, LOW=normal
-const uint8_t CIGARETTE_BUTTON_PIN = 26;  // HIGH=cigarette smoke, LOW=normal
+const uint8_t MODE_BUTTON_PIN = 32;       // GND=data collection, open=inference
+const uint8_t COOKING_BUTTON_PIN = 33;    // GND=cooking fume, open=normal
+const uint8_t EXHAUST_BUTTON_PIN = 25;    // GND=vehicle exhaust, open=normal
+const uint8_t CIGARETTE_BUTTON_PIN = 26;  // GND=cigarette smoke, open=normal
 const uint8_t LED_PIN = 27;
 
 struct InputState {
@@ -44,8 +44,8 @@ InputState inputs[] = {
 
 uint32_t lastPrintMs = 0;
 
-bool readHigh(uint8_t pin) {
-  return digitalRead(pin) == HIGH;
+bool readActive(uint8_t pin) {
+  return digitalRead(pin) == LOW;
 }
 
 const char *modeName() {
@@ -76,7 +76,7 @@ void printStateLine(const char *prefix) {
     Serial.print(' ');
     Serial.print(input.name);
     Serial.print('=');
-    Serial.print(input.stableState ? "HIGH" : "LOW");
+    Serial.print(input.stableState ? "1" : "0");
   }
 
   Serial.print(" led=");
@@ -85,8 +85,8 @@ void printStateLine(const char *prefix) {
 
 void setupInputs() {
   for (InputState &input : inputs) {
-    pinMode(input.pin, INPUT_PULLDOWN);
-    input.stableState = readHigh(input.pin);
+    pinMode(input.pin, INPUT_PULLUP);
+    input.stableState = readActive(input.pin);
     input.lastRawState = input.stableState;
     input.lastChangeMs = millis();
   }
@@ -97,7 +97,7 @@ void updateInputs() {
   bool anyStableChange = false;
 
   for (InputState &input : inputs) {
-    const bool rawState = readHigh(input.pin);
+    const bool rawState = readActive(input.pin);
 
     if (rawState != input.lastRawState) {
       input.lastRawState = rawState;
@@ -112,13 +112,12 @@ void updateInputs() {
       Serial.print("# changed ");
       Serial.print(input.name);
       Serial.print(" -> ");
-      Serial.println(input.stableState ? "HIGH" : "LOW");
+      Serial.println(input.stableState ? "1" : "0");
     }
   }
 
-  // In this test sketch, LED mirrors the cigarette label input so the output can
-  // be tested without needing smoke/inference.
-  digitalWrite(LED_PIN, inputs[3].stableState ? HIGH : LOW);
+  // In this test sketch, LED mirrors button 1 / GPIO32.
+  digitalWrite(LED_PIN, inputs[0].stableState ? HIGH : LOW);
 
   if (anyStableChange) {
     printStateLine("# state");
@@ -134,8 +133,8 @@ void setup() {
   setupInputs();
 
   Serial.println("# SmokeLens GPIO button test");
-  Serial.println("# pins use INPUT_PULLDOWN; drive each input to 3.3V for HIGH");
-  Serial.println("# LED mirrors button 8 / GPIO26 in this test sketch");
+  Serial.println("# pins use INPUT_PULLUP; connect each input to GND for 1");
+  Serial.println("# LED mirrors button 1 / GPIO32 in this test sketch");
   printStateLine("# initial");
 }
 

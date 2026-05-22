@@ -61,10 +61,10 @@ const uint8_t MQ7_PIN = 39;    // CO,  ADC1_CH3, VN
 const int PMS_RX_PIN = 16;  // ESP32 UART2 RX, connect to PMS5003T TX
 const int PMS_TX_PIN = 17;  // Not connected, kept for UART2 init
 
-const uint8_t MODE_BUTTON_PIN = 32;       // HIGH=data collection, LOW=inference
-const uint8_t COOKING_BUTTON_PIN = 33;    // HIGH=cooking fume label
-const uint8_t EXHAUST_BUTTON_PIN = 25;    // HIGH=vehicle exhaust label
-const uint8_t CIGARETTE_BUTTON_PIN = 26;  // HIGH=cigarette smoke label
+const uint8_t MODE_BUTTON_PIN = 32;       // GND=data collection, open=inference
+const uint8_t COOKING_BUTTON_PIN = 33;    // GND=cooking fume label
+const uint8_t EXHAUST_BUTTON_PIN = 25;    // GND=vehicle exhaust label
+const uint8_t CIGARETTE_BUTTON_PIN = 26;  // GND=cigarette smoke label
 
 const uint8_t CIGARETTE_LED_PIN = 27;
 
@@ -166,10 +166,10 @@ CollectionLabel selectedCollectionLabel(const ButtonSnapshot &buttons) {
 }
 
 void setupButtonsAndLED() {
-  pinMode(MODE_BUTTON_PIN, INPUT_PULLDOWN);
-  pinMode(COOKING_BUTTON_PIN, INPUT_PULLDOWN);
-  pinMode(EXHAUST_BUTTON_PIN, INPUT_PULLDOWN);
-  pinMode(CIGARETTE_BUTTON_PIN, INPUT_PULLDOWN);
+  pinMode(MODE_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(COOKING_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(EXHAUST_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(CIGARETTE_BUTTON_PIN, INPUT_PULLUP);
 
   pinMode(CIGARETTE_LED_PIN, OUTPUT);
   digitalWrite(CIGARETTE_LED_PIN, LOW);
@@ -177,10 +177,10 @@ void setupButtonsAndLED() {
 
 ButtonSnapshot readButtons() {
   ButtonSnapshot buttons;
-  buttons.dataCollectionMode = digitalRead(MODE_BUTTON_PIN) == HIGH;
-  buttons.cookingFume = digitalRead(COOKING_BUTTON_PIN) == HIGH;
-  buttons.vehicleExhaust = digitalRead(EXHAUST_BUTTON_PIN) == HIGH;
-  buttons.cigaretteSmoke = digitalRead(CIGARETTE_BUTTON_PIN) == HIGH;
+  buttons.dataCollectionMode = digitalRead(MODE_BUTTON_PIN) == LOW;
+  buttons.cookingFume = digitalRead(COOKING_BUTTON_PIN) == LOW;
+  buttons.vehicleExhaust = digitalRead(EXHAUST_BUTTON_PIN) == LOW;
+  buttons.cigaretteSmoke = digitalRead(CIGARETTE_BUTTON_PIN) == LOW;
   return buttons;
 }
 
