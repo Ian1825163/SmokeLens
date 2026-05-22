@@ -74,6 +74,7 @@ Firmware:
 
 - `SmokeLens.ino`
 - `arduino_secrets.example.h`
+- `tools/GpioButtonTest/GpioButtonTest.ino`
 - local ignored file: `arduino_secrets.h`
 
 Broker:
@@ -120,6 +121,30 @@ rule_fallback_v0
 ```
 
 This is a placeholder until trained model parameters are exported to firmware.
+
+## 2.2 GPIO Button Test Sketch
+
+Before testing full firmware, use:
+
+```text
+tools/GpioButtonTest/GpioButtonTest.ino
+```
+
+Arduino IDE setup:
+
+1. Open the test sketch directly.
+2. Upload to ESP32.
+3. Open Serial Monitor at `115200`.
+
+Expected:
+
+- GPIO32 HIGH prints `mode=data_collection`.
+- GPIO32 LOW prints `mode=inference`.
+- GPIO33 HIGH prints `label=cooking_fume`.
+- GPIO25 HIGH prints `label=vehicle_exhaust`.
+- GPIO26 HIGH prints `label=cigarette_smoke`.
+- GPIO26 HIGH also turns LED 1 on in the test sketch.
+- All label inputs LOW prints `label=normal_air`.
 
 ## 3. Start-Of-Session Checklist
 

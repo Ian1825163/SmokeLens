@@ -269,6 +269,39 @@ Current firmware inference uses `rule_fallback_v0` thresholds until trained
 model parameters are exported into firmware. The JSON field layout is already
 prepared for the final trained model output.
 
+## GPIO Button Test Sketch
+
+Before testing the full sensing firmware, you can verify the physical button
+inputs with:
+
+```text
+tools/GpioButtonTest/GpioButtonTest.ino
+```
+
+Open that sketch directly in Arduino IDE and upload it to the ESP32. Serial
+Monitor should be set to `115200 baud`.
+
+The test sketch:
+
+- Reads GPIO32 / GPIO33 / GPIO25 / GPIO26 with `INPUT_PULLDOWN`.
+- Prints a heartbeat every second.
+- Prints a change line whenever a button/switch changes state.
+- Mirrors Button 8 / GPIO26 to LED 1, default `GPIO2`, so LED wiring can be checked.
+
+Expected behavior:
+
+```text
+GPIO32 HIGH -> mode=data_collection
+GPIO32 LOW  -> mode=inference
+GPIO33 HIGH -> label=cooking_fume
+GPIO25 HIGH -> label=vehicle_exhaust
+GPIO26 HIGH -> label=cigarette_smoke and LED on
+all label buttons LOW -> label=normal_air
+```
+
+Important: button inputs must use `3.3V` for HIGH. Do not feed ESP32 GPIO pins
+with `5V`.
+
 Before MQTT is ready, it is okay to leave this in `arduino_secrets.h`:
 
 ```cpp
