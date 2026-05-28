@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SmokeLens Admin</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>SmokeLens Admin</strong>
+        <span>Node telemetry</span>
+      </div>
+      <nav class="nav" aria-label="Dashboard navigation">
+        <a href="/">Map</a>
+        <a href="/api/export.csv">CSV</a>
+      </nav>
+    </header>
+    <main class="admin-shell">
+      <section class="admin-metrics" aria-label="Latest metrics">
+        <div class="metric">
+          <label>Nodes online</label>
+          <strong id="nodesOnline">0/0</strong>
+          <small id="wsState">WebSocket connecting</small>
+        </div>
+        <div class="metric">
+          <label>Mode</label>
+          <strong id="modeValue">-</strong>
+          <small id="labelValue">-</small>
+        </div>
+        <div class="metric">
+          <label>PM2.5</label>
+          <strong id="adminPm25">-</strong>
+          <small>ug/m3</small>
+        </div>
+        <div class="metric">
+          <label>VOC / CO</label>
+          <strong id="adminGas">-</strong>
+          <small>raw ADC</small>
+        </div>
+        <div class="metric">
+          <label>Inference</label>
+          <strong id="adminInference">-</strong>
+          <small id="adminScore">-</small>
+        </div>
+      </section>
+      <section class="admin-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Nodes</h2>
+            <span class="subtle" id="lastUpdate">-</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Node</th>
+                  <th>Status</th>
+                  <th>Mode</th>
+                  <th>Label</th>
+                  <th>VOC</th>
+                  <th>CO</th>
+                  <th>PM2.5</th>
+                  <th>Temp</th>
+                  <th>Humidity</th>
+                  <th>Age</th>
+                </tr>
+              </thead>
+              <tbody id="nodeTable">
+                <tr>
+                  <td colspan="10" class="empty">Waiting for readings</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="reading-stack">
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Trend</h2>
+              <span class="subtle">PM2.5 / VOC / CO</span>
+            </div>
+            <canvas id="trendCanvas" class="trend" width="720" height="300"></canvas>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Live feed</h2>
+              <span class="subtle" id="feedCount">0</span>
+            </div>
+            <div id="feed" class="feed">
+              <div class="empty">Waiting for MQTT readings</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="/common.js"></script>
+    <script src="/admin.js"></script>
+  </body>
+</html>

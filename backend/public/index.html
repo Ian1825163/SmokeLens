@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SmokeLens</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIINfQCMU2kK7f4lOyfGZlADodo2E1RvJQ4="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>SmokeLens</strong>
+        <span>Area monitor</span>
+      </div>
+      <nav class="nav" aria-label="Dashboard navigation">
+        <a href="/admin">Admin</a>
+      </nav>
+    </header>
+    <main class="user-shell">
+      <section class="map-pane" aria-label="Smoke map">
+        <div id="map"></div>
+        <div class="map-overlay">
+          <div id="areaStatus" class="status-banner status-offline">
+            <strong>Waiting for data</strong>
+            <span>No live reading yet</span>
+          </div>
+        </div>
+      </section>
+      <aside class="side-panel">
+        <section class="panel-section">
+          <p class="section-title">Current area</p>
+          <div class="metric-grid">
+            <div class="metric">
+              <label>PM2.5</label>
+              <strong id="pm25Value">-</strong>
+              <small>ug/m3</small>
+            </div>
+            <div class="metric">
+              <label>Humidity</label>
+              <strong id="humidityValue">-</strong>
+              <small>%RH</small>
+            </div>
+            <div class="metric">
+              <label>VOC raw</label>
+              <strong id="vocValue">-</strong>
+              <small>ADC</small>
+            </div>
+            <div class="metric">
+              <label>CO raw</label>
+              <strong id="coValue">-</strong>
+              <small>ADC</small>
+            </div>
+          </div>
+        </section>
+        <section class="panel-section">
+          <p class="section-title">Nodes</p>
+          <div id="nodeList" class="node-list">
+            <div class="empty">Waiting for nodes</div>
+          </div>
+        </section>
+      </aside>
+    </main>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="/common.js"></script>
+    <script src="/dashboard.js"></script>
+  </body>
+</html>

@@ -21,11 +21,11 @@
 #endif
 
 #ifndef SMOKELENS_WIFI_SSID
-#define SMOKELENS_WIFI_SSID "YOUR_SSID"
+#define SMOKELENS_WIFI_SSID "YOUR_WIFI_SSID"
 #endif
 
 #ifndef SMOKELENS_WIFI_PASSWORD
-#define SMOKELENS_WIFI_PASSWORD "YOUR_PASSWORD"
+#define SMOKELENS_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 #endif
 
 #ifndef SMOKELENS_MQTT_SERVER
@@ -36,11 +36,22 @@
 #define SMOKELENS_NODE_ID "node_01"
 #endif
 
+#ifndef SMOKELENS_WIFI_CREDENTIALS
+#define SMOKELENS_WIFI_CREDENTIALS \
+  { { SMOKELENS_WIFI_SSID, SMOKELENS_WIFI_PASSWORD } }
+#endif
+
 // =========================
 // User configuration
 // =========================
-const char *WIFI_SSID = SMOKELENS_WIFI_SSID;
-const char *WIFI_PASSWORD = SMOKELENS_WIFI_PASSWORD;
+struct WiFiCredential {
+  const char *ssid;
+  const char *password;
+};
+
+const WiFiCredential WIFI_CREDENTIALS[] = SMOKELENS_WIFI_CREDENTIALS;
+const size_t WIFI_CREDENTIAL_COUNT =
+    sizeof(WIFI_CREDENTIALS) / sizeof(WIFI_CREDENTIALS[0]);
 
 const char *MQTT_SERVER = SMOKELENS_MQTT_SERVER;
 const uint16_t MQTT_PORT = 1883;
@@ -74,7 +85,8 @@ const uint8_t CIGARETTE_LED_PIN = 27;
 const uint32_t SERIAL_BAUD = 115200;
 const uint32_t PMS_BAUD = 9600;
 const uint32_t SAMPLE_INTERVAL_MS = 5000UL;
-const uint32_t WIFI_RETRY_INTERVAL_MS = 5000UL;
+const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000UL;
+const uint32_t WIFI_STATUS_PRINT_INTERVAL_MS = 5000UL;
 const uint32_t MQTT_RETRY_INTERVAL_MS = 5000UL;
 const uint32_t PMS_READ_TIMEOUT_MS = 1500UL;
 
@@ -96,9 +108,13 @@ PubSubClient mqtt(wifiClient);
 
 char mqttTopic[96];
 uint32_t lastWiFiAttemptMs = 0;
+uint32_t lastWiFiStatusPrintMs = 0;
 uint32_t lastMQTTAttemptMs = 0;
 uint32_t lastSampleMs = 0;
+int currentWiFiCredentialIndex = -1;
 bool timeConfigured = false;
+bool wifiWasConnected = false;
+bool mqttTcpDiagnosticPrinted = false;
 
 struct PMS5003TData {
   bool valid;
@@ -211,10 +227,84 @@ InferenceResult runCigaretteInference(uint16_t vocRaw, uint16_t coRaw,
   return result;
 }
 
+bool mqttServerLooksValid() {
+  return strlen(MQTT_SERVER) > 0 && strcmp(MQTT_SERVER, "192.168.x.x") != 0 &&
+         strcmp(MQTT_SERVER, "YOUR_LAPTOP_WIFI_IP") != 0;
+}
+
+bool wifiCredentialLooksValid(const WiFiCredential &credential) {
+  return strlen(credential.ssid) > 0 &&
+         strcmp(credential.ssid, "YOUR_SSID") != 0 &&
+         strcmp(credential.ssid, "YOUR_WIFI_SSID") != 0 &&
+         strcmp(credential.password, "YOUR_PASSWORD") != 0 &&
+         strcmp(credential.password, "YOUR_WIFI_PASSWORD") != 0;
+}
+
+int nextValidWiFiCredentialIndex() {
+  if (WIFI_CREDENTIAL_COUNT == 0) {
+    return -1;
+  }
+
+  const size_t baseIndex = currentWiFiCredentialIndex < 0
+                               ? WIFI_CREDENTIAL_COUNT - 1
+                               : static_cast<size_t>(currentWiFiCredentialIndex);
+
+  for (size_t offset = 1; offset <= WIFI_CREDENTIAL_COUNT; ++offset) {
+    const size_t candidateIndex = (baseIndex + offset) % WIFI_CREDENTIAL_COUNT;
+    if (wifiCredentialLooksValid(WIFI_CREDENTIALS[candidateIndex])) {
+      return static_cast<int>(candidateIndex);
+    }
+  }
+
+  return -1;
+}
+
 bool wifiConfigLooksValid() {
-  return ENABLE_WIFI_MQTT && strlen(WIFI_SSID) > 0 &&
-         strcmp(WIFI_SSID, "YOUR_SSID") != 0 &&
-         strcmp(MQTT_SERVER, "192.168.x.x") != 0;
+  return ENABLE_WIFI_MQTT && mqttServerLooksValid() &&
+         nextValidWiFiCredentialIndex() >= 0;
+}
+
+void printNetworkDetails() {
+  Serial.print("# WiFi connected ssid=");
+  Serial.print(WiFi.SSID());
+  Serial.print(" ip=");
+  Serial.print(WiFi.localIP());
+  Serial.print(" gateway=");
+  Serial.print(WiFi.gatewayIP());
+  Serial.print(" subnet=");
+  Serial.print(WiFi.subnetMask());
+  Serial.print(" rssi=");
+  Serial.println(WiFi.RSSI());
+}
+
+bool testMQTTTcpConnect() {
+  WiFiClient testClient;
+  const bool connected = testClient.connect(MQTT_SERVER, MQTT_PORT);
+  if (connected) {
+    testClient.stop();
+  }
+  return connected;
+}
+
+const char *wifiStatusToString(wl_status_t status) {
+  switch (status) {
+    case WL_IDLE_STATUS:
+      return "WL_IDLE_STATUS";
+    case WL_NO_SSID_AVAIL:
+      return "WL_NO_SSID_AVAIL";
+    case WL_SCAN_COMPLETED:
+      return "WL_SCAN_COMPLETED";
+    case WL_CONNECTED:
+      return "WL_CONNECTED";
+    case WL_CONNECT_FAILED:
+      return "WL_CONNECT_FAILED";
+    case WL_CONNECTION_LOST:
+      return "WL_CONNECTION_LOST";
+    case WL_DISCONNECTED:
+      return "WL_DISCONNECTED";
+    default:
+      return "WL_UNKNOWN";
+  }
 }
 
 uint16_t readU16BE(const uint8_t *buffer, size_t index) {
@@ -349,33 +439,86 @@ PMS5003TData readPMS5003T() {
   return latest;
 }
 
+void startWiFiAttempt() {
+  const int nextIndex = nextValidWiFiCredentialIndex();
+  if (nextIndex < 0) {
+    Serial.println("# WiFi skipped: update WiFi credentials first");
+    return;
+  }
+
+  currentWiFiCredentialIndex = nextIndex;
+  const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+
+  WiFi.disconnect(false);
+  WiFi.begin(credential.ssid, credential.password);
+  lastWiFiAttemptMs = millis();
+  lastWiFiStatusPrintMs = lastWiFiAttemptMs;
+  mqttTcpDiagnosticPrinted = false;
+  wifiWasConnected = false;
+
+  Serial.print("# WiFi connecting to ");
+  Serial.print(credential.ssid);
+  Serial.print(" (");
+  Serial.print(currentWiFiCredentialIndex + 1);
+  Serial.print("/");
+  Serial.print(WIFI_CREDENTIAL_COUNT);
+  Serial.println(")");
+}
+
 void beginWiFi() {
-  if (!wifiConfigLooksValid()) {
-    Serial.println("# WiFi/MQTT skipped: update WIFI_SSID and MQTT_SERVER first");
+  if (!ENABLE_WIFI_MQTT) {
+    Serial.println("# WiFi/MQTT skipped: disabled in firmware");
+    return;
+  }
+
+  if (!mqttServerLooksValid()) {
+    Serial.println("# WiFi/MQTT skipped: update MQTT_SERVER first");
     return;
   }
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  lastWiFiAttemptMs = millis();
-  Serial.print("# WiFi connecting to ");
-  Serial.println(WIFI_SSID);
+  startWiFiAttempt();
 }
 
 void maintainWiFi() {
-  if (!wifiConfigLooksValid() || WiFi.status() == WL_CONNECTED) {
+  if (!wifiConfigLooksValid()) {
     return;
   }
 
-  if (millis() - lastWiFiAttemptMs < WIFI_RETRY_INTERVAL_MS) {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wifiWasConnected) {
+      wifiWasConnected = true;
+      mqttTcpDiagnosticPrinted = false;
+      printNetworkDetails();
+    }
     return;
   }
 
-  lastWiFiAttemptMs = millis();
-  Serial.println("# WiFi reconnecting");
-  WiFi.disconnect();
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  if (wifiWasConnected) {
+    wifiWasConnected = false;
+    timeConfigured = false;
+    Serial.println("# WiFi disconnected");
+  }
+
+  const uint32_t elapsedMs = millis() - lastWiFiAttemptMs;
+
+  if (millis() - lastWiFiStatusPrintMs >= WIFI_STATUS_PRINT_INTERVAL_MS) {
+    lastWiFiStatusPrintMs = millis();
+    Serial.print("# WiFi waiting status=");
+    Serial.print(wifiStatusToString(WiFi.status()));
+    Serial.print(" elapsed_s=");
+    Serial.println(elapsedMs / 1000UL);
+  }
+
+  if (elapsedMs < WIFI_CONNECT_TIMEOUT_MS) {
+    return;
+  }
+
+  Serial.print("# WiFi connect timeout status=");
+  Serial.println(wifiStatusToString(WiFi.status()));
+  Serial.println("# WiFi trying next saved network");
+  startWiFiAttempt();
 }
 
 void setupTimeIfNeeded() {
@@ -425,6 +568,12 @@ void maintainMQTT() {
   Serial.print(MQTT_SERVER);
   Serial.print(':');
   Serial.println(MQTT_PORT);
+
+  if (!mqttTcpDiagnosticPrinted) {
+    mqttTcpDiagnosticPrinted = true;
+    Serial.print("# MQTT TCP diagnostic ");
+    Serial.println(testMQTTTcpConnect() ? "ok" : "failed");
+  }
 
   if (mqtt.connect(NODE_ID)) {
     Serial.println("# MQTT connected");

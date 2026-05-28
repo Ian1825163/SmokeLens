@@ -1,15 +1,26 @@
-# SmokeLens Feature Branch Plan
+# SmokeLens Progress And Next Plan
 
-Updated: 2026-05-22
+Updated: 2026-05-28
 
 Current branch:
 
 ```text
-feature/esp32-button-modes
+main
 ```
 
-This file is the handoff plan for the next work session. Follow the steps from
-top to bottom to continue without reconstructing today's context.
+This file is the handoff plan for the next work session. For test commands and
+data collection checklists, start from `QUICKSTART.md`.
+
+Current working run flow:
+
+```text
+Terminal 1: Mosquitto with broker/mosquitto.conf
+Terminal 2: backend npm.cmd start
+Terminal 3: tools/SerialCsvLogger.ps1 -Port COM11
+ESP32: plugged into laptop, running SmokeLens.ino
+```
+
+This records data through both MQTT/dashboard and USB Serial CSV when MQTT is available.
 
 ## 0. Today Summary
 
@@ -32,12 +43,18 @@ Completed today:
 - WiFi/MQTT secrets were moved out of `SmokeLens.ino` into ignored `arduino_secrets.h`.
 - `arduino_secrets.example.h` was added as the committed template.
 
-New feature work started:
+Button/mode feature work completed and merged:
 
 - Added ESP32 button-controlled mode switching.
 - Added firmware JSON fields for data collection labels and inference output.
 - Added LED 1 alert output for cigarette detection in inference mode.
 - Added backend database/CSV columns for mode, labels, inference class, score, and model version.
+- Added `QUICKSTART.md` so GPIO tests, data collection, backend startup, and CSV export commands are easier to find.
+- Added multi-WiFi firmware configuration through `SMOKELENS_WIFI_CREDENTIALS`, while keeping the old single-WiFi macros compatible.
+- Added `tools/SerialCsvLogger.ps1` for USB Serial data collection without MQTT, with automatic CSV splitting by mode/label segment.
+- Added web dashboards:
+  - `/` for user-facing smoke area status on a Leaflet/OpenStreetMap view.
+  - `/admin` for developer telemetry, node status, trend, and live feed.
 
 Important local-only files:
 
@@ -74,6 +91,8 @@ Firmware:
 
 - `SmokeLens.ino`
 - `arduino_secrets.example.h`
+- `QUICKSTART.md`
+- `tools/SerialCsvLogger.ps1`
 - `tools/GpioButtonTest/GpioButtonTest.ino`
 - local ignored file: `arduino_secrets.h`
 
@@ -92,6 +111,7 @@ Backend:
 - `backend/src/csv.js`
 - `backend/scripts/export-csv.js`
 - `backend/.env.example`
+- `backend/public/`
 - local ignored file: `backend/.env`
 
 Data:

@@ -1,4 +1,5 @@
 const http = require("http");
+const path = require("path");
 const express = require("express");
 const mqtt = require("mqtt");
 const { WebSocketServer, WebSocket } = require("ws");
@@ -51,10 +52,17 @@ function broadcast(wss, event) {
 }
 
 function registerRoutes(app, wss, store) {
-  app.get("/", (req, res) => {
+  app.get("/admin", (req, res) => {
+    res.sendFile(path.join(__dirname, "..", "public", "admin.html"));
+  });
+
+  app.get("/api", (req, res) => {
     res.json({
       service: "SmokeLens backend",
       endpoints: [
+        "/",
+        "/admin",
+        "/api/config",
         "/api/health",
         "/api/latest",
         "/api/history?node_id=node_01&limit=100",
@@ -62,6 +70,14 @@ function registerRoutes(app, wss, store) {
         "/api/export.csv"
       ],
       websocket: "/"
+    });
+  });
+
+  app.get("/api/config", (req, res) => {
+    res.json({
+      node_locations: config.nodeLocations,
+      node_timeout_ms: config.nodeTimeoutMs,
+      mqtt_topic: config.mqttTopic
     });
   });
 
@@ -130,6 +146,7 @@ async function main() {
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     next();
   });
+  app.use(express.static(path.join(__dirname, "..", "public")));
 
   registerRoutes(app, wss, store);
 
