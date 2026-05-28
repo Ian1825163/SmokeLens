@@ -100,17 +100,22 @@ a {
 .user-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
-  min-height: calc(100vh - 60px);
+  height: calc(100vh - 60px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .map-pane {
-  min-height: calc(100vh - 60px);
+  min-height: 0;
+  overflow: hidden;
   position: relative;
 }
 
 #map {
+  inset: 0;
   height: 100%;
-  min-height: 520px;
+  min-height: 0;
+  position: absolute;
   width: 100%;
 }
 
@@ -162,7 +167,9 @@ a {
   border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-width: 0;
+  overflow: auto;
 }
 
 .panel-section {
@@ -177,6 +184,18 @@ a {
   letter-spacing: 0.08em;
   margin: 0 0 12px;
   text-transform: uppercase;
+}
+
+.section-head {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.section-head .section-title {
+  margin: 0;
 }
 
 .reading-stack {
@@ -353,6 +372,14 @@ th {
   width: 100%;
 }
 
+.trend-compact {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: block;
+  height: 190px;
+}
+
 .feed {
   display: grid;
   gap: 10px;
@@ -371,26 +398,176 @@ th {
   padding: 18px;
 }
 
+/* Critical Leaflet layout rules. Keep these local so the map still renders
+   correctly if the CDN stylesheet is slow or unavailable during demos. */
 .leaflet-container {
+  background: #dfe8e1;
   font: inherit;
+  overflow: hidden;
+  position: relative;
+}
+
+.leaflet-container img {
+  max-width: none;
+}
+
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-tile-container,
+.leaflet-pane > svg,
+.leaflet-pane > canvas,
+.leaflet-zoom-box,
+.leaflet-image-layer,
+.leaflet-layer {
+  left: 0;
+  position: absolute;
+  top: 0;
+}
+
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.leaflet-tile {
+  filter: inherit;
+  visibility: hidden;
+}
+
+.leaflet-tile-loaded {
+  visibility: inherit;
+}
+
+.leaflet-zoom-animated {
+  transform-origin: 0 0;
+}
+
+.leaflet-pane {
+  z-index: 400;
+}
+
+.leaflet-tile-pane {
+  z-index: 200;
+}
+
+.leaflet-overlay-pane {
+  z-index: 400;
+}
+
+.leaflet-marker-pane {
+  z-index: 600;
+}
+
+.leaflet-popup-pane {
+  z-index: 700;
+}
+
+.leaflet-control-container .leaflet-top,
+.leaflet-control-container .leaflet-bottom {
+  position: absolute;
+  z-index: 1000;
+}
+
+.leaflet-top {
+  top: 0;
+}
+
+.leaflet-right {
+  right: 0;
+}
+
+.leaflet-bottom {
+  bottom: 0;
+}
+
+.leaflet-left {
+  left: 0;
+}
+
+.leaflet-control {
+  clear: both;
+  float: left;
+}
+
+.leaflet-right .leaflet-control {
+  float: right;
+}
+
+.leaflet-top .leaflet-control {
+  margin-top: 10px;
+}
+
+.leaflet-bottom .leaflet-control {
+  margin-bottom: 10px;
+}
+
+.leaflet-left .leaflet-control {
+  margin-left: 10px;
+}
+
+.leaflet-right .leaflet-control {
+  margin-right: 10px;
+}
+
+.leaflet-control-zoom {
+  border: 1px solid rgba(24, 32, 29, 0.2);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.leaflet-control-zoom a {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  display: flex;
+  font-size: 18px;
+  font-weight: 700;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  text-decoration: none;
+  width: 32px;
+}
+
+.leaflet-control-zoom a:last-child {
+  border-bottom: 0;
+}
+
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 6px;
 }
 
 @media (max-width: 920px) {
   .user-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: calc(100vh - 60px);
+    overflow: visible;
   }
 
   .map-pane {
-    min-height: 58vh;
+    height: 58vh;
+    min-height: 380px;
   }
 
   #map {
-    min-height: 58vh;
+    min-height: 0;
   }
 
   .side-panel {
     border-left: 0;
     border-top: 1px solid var(--line);
+    height: auto;
+    overflow: visible;
   }
 
   .admin-metrics,

@@ -60,15 +60,16 @@ const SmokeLens = (() => {
 
     const inferenceClass = String(reading.inference_class || "");
     const label = String(reading.collection_label || "");
+    const labelledCigarette = label === "cigarette_smoke";
     const detected =
       bool(reading.cigarette_detected) ||
       inferenceClass === "cigarette_smoke" ||
-      label === "cigarette_smoke";
+      labelledCigarette;
 
     if (detected) {
       return {
         key: "alert",
-        label: "Smoke detected",
+        label: labelledCigarette ? "Cigarette smoke" : "Smoke detected",
         className: "alert",
         color: "#d43d32",
         intensity: 1
@@ -87,7 +88,7 @@ const SmokeLens = (() => {
 
     return {
       key: "normal",
-      label: "Clear",
+      label: "Normal air",
       className: "normal",
       color: "#1f9d67",
       intensity: 0.15
