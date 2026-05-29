@@ -47,12 +47,14 @@
 struct WiFiCredential {
   const char *ssid;
   const char *password;
+  const char *mqttServer;
 };
 
 const WiFiCredential WIFI_CREDENTIALS[] = SMOKELENS_WIFI_CREDENTIALS;
 const size_t WIFI_CREDENTIAL_COUNT =
     sizeof(WIFI_CREDENTIALS) / sizeof(WIFI_CREDENTIALS[0]);
 
+const char *DEFAULT_MQTT_SERVER = SMOKELENS_MQTT_SERVER;
 const char *MQTT_SERVER = SMOKELENS_MQTT_SERVER;
 const uint16_t MQTT_PORT = 1883;
 const char *NODE_ID = SMOKELENS_NODE_ID;
@@ -227,9 +229,17 @@ InferenceResult runCigaretteInference(uint16_t vocRaw, uint16_t coRaw,
   return result;
 }
 
-bool mqttServerLooksValid() {
-  return strlen(MQTT_SERVER) > 0 && strcmp(MQTT_SERVER, "192.168.x.x") != 0 &&
-         strcmp(MQTT_SERVER, "YOUR_LAPTOP_WIFI_IP") != 0;
+bool mqttServerValueLooksValid(const char *server) {
+  return server != nullptr && strlen(server) > 0 &&
+         strcmp(server, "192.168.x.x") != 0 &&
+         strcmp(server, "YOUR_LAPTOP_WIFI_IP") != 0;
+}
+
+const char *mqttServerForCredential(const WiFiCredential &credential) {
+  if (mqttServerValueLooksValid(credential.mqttServer)) {
+    return credential.mqttServer;
+  }
+  return DEFAULT_MQTT_SERVER;
 }
 
 bool wifiCredentialLooksValid(const WiFiCredential &credential) {
@@ -238,6 +248,11 @@ bool wifiCredentialLooksValid(const WiFiCredential &credential) {
          strcmp(credential.ssid, "YOUR_WIFI_SSID") != 0 &&
          strcmp(credential.password, "YOUR_PASSWORD") != 0 &&
          strcmp(credential.password, "YOUR_WIFI_PASSWORD") != 0;
+}
+
+bool wifiCredentialConfigLooksValid(const WiFiCredential &credential) {
+  return wifiCredentialLooksValid(credential) &&
+         mqttServerValueLooksValid(mqttServerForCredential(credential));
 }
 
 int nextValidWiFiCredentialIndex() {
@@ -251,7 +266,7 @@ int nextValidWiFiCredentialIndex() {
 
   for (size_t offset = 1; offset <= WIFI_CREDENTIAL_COUNT; ++offset) {
     const size_t candidateIndex = (baseIndex + offset) % WIFI_CREDENTIAL_COUNT;
-    if (wifiCredentialLooksValid(WIFI_CREDENTIALS[candidateIndex])) {
+    if (wifiCredentialConfigLooksValid(WIFI_CREDENTIALS[candidateIndex])) {
       return static_cast<int>(candidateIndex);
     }
   }
@@ -260,8 +275,7 @@ int nextValidWiFiCredentialIndex() {
 }
 
 bool wifiConfigLooksValid() {
-  return ENABLE_WIFI_MQTT && mqttServerLooksValid() &&
-         nextValidWiFiCredentialIndex() >= 0;
+  return ENABLE_WIFI_MQTT && nextValidWiFiCredentialIndex() >= 0;
 }
 
 void printNetworkDetails() {
@@ -274,7 +288,9 @@ void printNetworkDetails() {
   Serial.print(" subnet=");
   Serial.print(WiFi.subnetMask());
   Serial.print(" rssi=");
-  Serial.println(WiFi.RSSI());
+  Serial.print(WiFi.RSSI());
+  Serial.print(" mqtt_server=");
+  Serial.println(MQTT_SERVER);
 }
 
 bool testMQTTTcpConnect() {
@@ -442,13 +458,18 @@ PMS5003TData readPMS5003T() {
 void startWiFiAttempt() {
   const int nextIndex = nextValidWiFiCredentialIndex();
   if (nextIndex < 0) {
-    Serial.println("# WiFi skipped: update WiFi credentials first");
+    Serial.println("# WiFi skipped: update WiFi credentials and MQTT servers first");
     return;
   }
 
   currentWiFiCredentialIndex = nextIndex;
   const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+  MQTT_SERVER = mqttServerForCredential(credential);
 
+  if (mqtt.connected()) {
+    mqtt.disconnect();
+  }
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
   WiFi.disconnect(false);
   WiFi.begin(credential.ssid, credential.password);
   lastWiFiAttemptMs = millis();
@@ -462,17 +483,13 @@ void startWiFiAttempt() {
   Serial.print(currentWiFiCredentialIndex + 1);
   Serial.print("/");
   Serial.print(WIFI_CREDENTIAL_COUNT);
-  Serial.println(")");
+  Serial.print(") mqtt=");
+  Serial.println(MQTT_SERVER);
 }
 
 void beginWiFi() {
   if (!ENABLE_WIFI_MQTT) {
     Serial.println("# WiFi/MQTT skipped: disabled in firmware");
-    return;
-  }
-
-  if (!mqttServerLooksValid()) {
-    Serial.println("# WiFi/MQTT skipped: update MQTT_SERVER first");
     return;
   }
 
