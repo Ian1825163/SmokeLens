@@ -163,6 +163,9 @@ async function main() {
 
   const mqttClient = mqtt.connect(config.mqttUrl, {
     clientId: `smokelens_backend_${Math.random().toString(16).slice(2)}`,
+    username: config.mqttUsername,
+    password: config.mqttPassword,
+    rejectUnauthorized: config.mqttRejectUnauthorized,
     reconnectPeriod: 5000
   });
 

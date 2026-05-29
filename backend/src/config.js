@@ -11,6 +11,14 @@ function numberFromEnv(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function boolFromEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
+  return ["1", "true", "yes", "on"].includes(String(raw).toLowerCase());
+}
+
 function resolveOptionalPath(value, fallback) {
   if (!value) {
     return fallback;
@@ -50,6 +58,9 @@ module.exports = {
   ),
   httpPort: numberFromEnv("HTTP_PORT", 3000),
   mqttUrl: process.env.MQTT_URL || "mqtt://localhost:1883",
+  mqttUsername: process.env.MQTT_USERNAME || undefined,
+  mqttPassword: process.env.MQTT_PASSWORD || undefined,
+  mqttRejectUnauthorized: boolFromEnv("MQTT_REJECT_UNAUTHORIZED", true),
   mqttTopic: process.env.MQTT_TOPIC || "smokelens/+/data",
   nodeLocations: parseJsonEnv("NODE_LOCATIONS_JSON", defaultNodeLocations),
   nodeTimeoutMs: numberFromEnv("NODE_TIMEOUT_MS", 30000),

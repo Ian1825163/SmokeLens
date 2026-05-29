@@ -110,6 +110,26 @@ for the Mosquitto broker IP used on that network:
 Rows with only SSID/password still work and fall back to
 `SMOKELENS_MQTT_SERVER`.
 
+Cloud MQTT branch notes:
+
+```cpp
+#define SMOKELENS_MQTT_SERVER "your-cluster.s1.eu.hivemq.cloud"
+#define SMOKELENS_MQTT_PORT 8883
+#define SMOKELENS_MQTT_USE_TLS true
+#define SMOKELENS_MQTT_USERNAME "YOUR_CLOUD_MQTT_USERNAME"
+#define SMOKELENS_MQTT_PASSWORD "YOUR_CLOUD_MQTT_PASSWORD"
+```
+
+Backend `.env` can subscribe to the same cloud broker:
+
+```text
+MQTT_URL=mqtts://your-cluster.s1.eu.hivemq.cloud:8883
+MQTT_USERNAME=YOUR_CLOUD_MQTT_USERNAME
+MQTT_PASSWORD=YOUR_CLOUD_MQTT_PASSWORD
+```
+
+See `CLOUD_MQTT.md` for the branch-specific setup flow.
+
 然後填入 WiFi SSID、password、筆電 MQTT broker IP 和 node ID。韌體支援多組 WiFi，會依序嘗試 `SMOKELENS_WIFI_CREDENTIALS` 裡的 SSID；舊的單組 `SMOKELENS_WIFI_SSID` / `SMOKELENS_WIFI_PASSWORD` 寫法也仍可用。
 
 ## Current Focus

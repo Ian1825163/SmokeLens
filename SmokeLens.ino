@@ -11,6 +11,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <HardwareSerial.h>
@@ -30,6 +31,26 @@
 
 #ifndef SMOKELENS_MQTT_SERVER
 #define SMOKELENS_MQTT_SERVER "192.168.x.x"
+#endif
+
+#ifndef SMOKELENS_MQTT_PORT
+#define SMOKELENS_MQTT_PORT 1883
+#endif
+
+#ifndef SMOKELENS_MQTT_USE_TLS
+#define SMOKELENS_MQTT_USE_TLS false
+#endif
+
+#ifndef SMOKELENS_MQTT_TLS_INSECURE
+#define SMOKELENS_MQTT_TLS_INSECURE true
+#endif
+
+#ifndef SMOKELENS_MQTT_USERNAME
+#define SMOKELENS_MQTT_USERNAME ""
+#endif
+
+#ifndef SMOKELENS_MQTT_PASSWORD
+#define SMOKELENS_MQTT_PASSWORD ""
 #endif
 
 #ifndef SMOKELENS_NODE_ID
@@ -56,7 +77,11 @@ const size_t WIFI_CREDENTIAL_COUNT =
 
 const char *DEFAULT_MQTT_SERVER = SMOKELENS_MQTT_SERVER;
 const char *MQTT_SERVER = SMOKELENS_MQTT_SERVER;
-const uint16_t MQTT_PORT = 1883;
+const uint16_t MQTT_PORT = SMOKELENS_MQTT_PORT;
+const bool MQTT_USE_TLS = SMOKELENS_MQTT_USE_TLS;
+const bool MQTT_TLS_INSECURE = SMOKELENS_MQTT_TLS_INSECURE;
+const char *MQTT_USERNAME = SMOKELENS_MQTT_USERNAME;
+const char *MQTT_PASSWORD = SMOKELENS_MQTT_PASSWORD;
 const char *NODE_ID = SMOKELENS_NODE_ID;
 
 // Set to false for first wiring tests if WiFi/MQTT is not ready yet.
@@ -106,6 +131,7 @@ const float MODEL_CIGARETTE_SCORE_THRESHOLD = 0.65f;
 
 HardwareSerial pmsSerial(2);
 WiFiClient wifiClient;
+WiFiClientSecure secureWifiClient;
 PubSubClient mqtt(wifiClient);
 
 char mqttTopic[96];
@@ -278,6 +304,23 @@ bool wifiConfigLooksValid() {
   return ENABLE_WIFI_MQTT && nextValidWiFiCredentialIndex() >= 0;
 }
 
+bool mqttCredentialsConfigured() {
+  return strlen(MQTT_USERNAME) > 0;
+}
+
+void configureMQTTClient() {
+  if (MQTT_USE_TLS) {
+    if (MQTT_TLS_INSECURE) {
+      secureWifiClient.setInsecure();
+    }
+    mqtt.setClient(secureWifiClient);
+  } else {
+    mqtt.setClient(wifiClient);
+  }
+
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+}
+
 void printNetworkDetails() {
   Serial.print("# WiFi connected ssid=");
   Serial.print(WiFi.SSID());
@@ -294,12 +337,32 @@ void printNetworkDetails() {
 }
 
 bool testMQTTTcpConnect() {
+  if (MQTT_USE_TLS) {
+    WiFiClientSecure testClient;
+    if (MQTT_TLS_INSECURE) {
+      testClient.setInsecure();
+    }
+    const bool connected = testClient.connect(MQTT_SERVER, MQTT_PORT);
+    if (connected) {
+      testClient.stop();
+    }
+    return connected;
+  }
+
   WiFiClient testClient;
   const bool connected = testClient.connect(MQTT_SERVER, MQTT_PORT);
   if (connected) {
     testClient.stop();
   }
+
   return connected;
+}
+
+bool connectMQTTClient() {
+  if (mqttCredentialsConfigured()) {
+    return mqtt.connect(NODE_ID, MQTT_USERNAME, MQTT_PASSWORD);
+  }
+  return mqtt.connect(NODE_ID);
 }
 
 const char *wifiStatusToString(wl_status_t status) {
@@ -469,7 +532,7 @@ void startWiFiAttempt() {
   if (mqtt.connected()) {
     mqtt.disconnect();
   }
-  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  configureMQTTClient();
   WiFi.disconnect(false);
   WiFi.begin(credential.ssid, credential.password);
   lastWiFiAttemptMs = millis();
@@ -584,7 +647,11 @@ void maintainMQTT() {
   Serial.print("# MQTT connecting to ");
   Serial.print(MQTT_SERVER);
   Serial.print(':');
-  Serial.println(MQTT_PORT);
+  Serial.print(MQTT_PORT);
+  Serial.print(" tls=");
+  Serial.print(MQTT_USE_TLS ? "on" : "off");
+  Serial.print(" auth=");
+  Serial.println(mqttCredentialsConfigured() ? "on" : "off");
 
   if (!mqttTcpDiagnosticPrinted) {
     mqttTcpDiagnosticPrinted = true;
@@ -592,7 +659,7 @@ void maintainMQTT() {
     Serial.println(testMQTTTcpConnect() ? "ok" : "failed");
   }
 
-  if (mqtt.connect(NODE_ID)) {
+  if (connectMQTTClient()) {
     Serial.println("# MQTT connected");
   } else {
     Serial.print("# MQTT failed, state=");
@@ -713,12 +780,18 @@ void setup() {
   pmsSerial.setRxBufferSize(512);
   pmsSerial.begin(PMS_BAUD, SERIAL_8N1, PMS_RX_PIN, PMS_TX_PIN);
 
-  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  configureMQTTClient();
   mqtt.setBufferSize(512);
 
   Serial.println("# SmokeLens node boot");
   Serial.print("# MQTT topic=");
   Serial.println(mqttTopic);
+  Serial.print("# MQTT transport tls=");
+  Serial.print(MQTT_USE_TLS ? "on" : "off");
+  Serial.print(" port=");
+  Serial.print(MQTT_PORT);
+  Serial.print(" auth=");
+  Serial.println(mqttCredentialsConfigured() ? "on" : "off");
 
   beginWiFi();
   warmupSensors();
