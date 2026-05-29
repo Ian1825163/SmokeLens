@@ -1,5 +1,8 @@
 .pio/
 .vscode/
+.env/
+__pycache__/
+*.pyc
 arduino_secrets.h
 *.bin
 *.elf
