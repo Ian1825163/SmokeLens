@@ -11,7 +11,7 @@ const state = {
 
 const MAP_RADIUS_SCALE = 0.25;
 const MIN_VISIBLE_RADIUS_M = 12;
-const TREND_EMA_ALPHA = 0.18;
+const TREND_EMA_ALPHA = 0.1;
 
 function displayRadiusMeters(location) {
   return Math.max(MIN_VISIBLE_RADIUS_M, location.radius_m * MAP_RADIUS_SCALE);

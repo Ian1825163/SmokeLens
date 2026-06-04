@@ -5,7 +5,7 @@ const state = {
   feed: [],
   websocketOpen: false
 };
-const TREND_EMA_ALPHA = 0.18;
+const TREND_EMA_ALPHA = 0.1;
 
 function latestReading() {
   return state.latest[0]?.latest || null;
