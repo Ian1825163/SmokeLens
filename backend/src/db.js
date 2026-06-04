@@ -46,6 +46,10 @@ function boundedLimit(value, fallback, max) {
   return Math.min(Math.trunc(parsed), max);
 }
 
+function clampVariance(value) {
+  return value > 0 ? value : 0;
+}
+
 function queryAll(db, sql, params = []) {
   const statement = db.prepare(sql);
   const rows = [];
@@ -297,9 +301,95 @@ async function openDatabase(config) {
     }));
   }
 
+  function baselineSummary(options = {}) {
+    const where = [
+      "mode = ?",
+      "collection_label = ?",
+      "pms_valid = 1",
+      "pm2_5 IS NOT NULL",
+      "voc_raw IS NOT NULL",
+      "co_raw IS NOT NULL"
+    ];
+    const params = [
+      String(options.mode || "data_collection"),
+      String(options.collectionLabel || "normal_air")
+    ];
+
+    if (options.nodeId) {
+      where.push("node_id = ?");
+      params.push(String(options.nodeId));
+    }
+
+    const summary = queryOne(
+      db,
+      `
+        SELECT
+          COUNT(*) AS row_count,
+          AVG(pm2_5) AS pm2_5_mean,
+          AVG(pm2_5 * pm2_5) AS pm2_5_mean_square,
+          AVG(voc_raw) AS voc_raw_mean,
+          AVG(voc_raw * voc_raw) AS voc_raw_mean_square,
+          AVG(co_raw) AS co_raw_mean,
+          AVG(co_raw * co_raw) AS co_raw_mean_square
+        FROM readings
+        WHERE ${where.join(" AND ")}
+      `,
+      params
+    );
+
+    const rowCount = Number(summary?.row_count || 0);
+    const pm25Mean = nullableNumber(summary?.pm2_5_mean);
+    const vocMean = nullableNumber(summary?.voc_raw_mean);
+    const coMean = nullableNumber(summary?.co_raw_mean);
+    const pm25Std =
+      pm25Mean === null
+        ? null
+        : Math.sqrt(
+            clampVariance(
+              Number(summary.pm2_5_mean_square) - pm25Mean * pm25Mean
+            )
+          );
+    const vocStd =
+      vocMean === null
+        ? null
+        : Math.sqrt(
+            clampVariance(
+              Number(summary.voc_raw_mean_square) - vocMean * vocMean
+            )
+          );
+    const coStd =
+      coMean === null
+        ? null
+        : Math.sqrt(
+            clampVariance(Number(summary.co_raw_mean_square) - coMean * coMean)
+          );
+
+    return {
+      mode: params[0],
+      collection_label: params[1],
+      node_id: options.nodeId ? String(options.nodeId) : null,
+      row_count: rowCount,
+      metrics: {
+        pm2_5: {
+          mean: pm25Mean,
+          stddev: pm25Std
+        },
+        voc_raw: {
+          mean: vocMean,
+          stddev: vocStd
+        },
+        co_raw: {
+          mean: coMean,
+          stddev: coStd
+        }
+      }
+    };
+  }
+
   return {
     db,
     close: () => db.close(),
+    baselineSummary,
     saveReading,
     latestReadings,
     historyReadings,

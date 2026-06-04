@@ -37,14 +37,14 @@
           <p class="section-title">Current area</p>
           <div class="metric-grid">
             <div class="metric">
-              <label>PM2.5</label>
-              <strong id="pm25Value">-</strong>
+              <label>PM 1.0 / 2.5 / 10</label>
+              <strong id="pmValue">-</strong>
               <small>ug/m3</small>
             </div>
             <div class="metric">
-              <label>Humidity</label>
-              <strong id="humidityValue">-</strong>
-              <small>%RH</small>
+              <label>Temp / Humidity</label>
+              <strong id="climateValue">-</strong>
+              <small>C / %RH</small>
             </div>
             <div class="metric">
               <label>VOC raw</label>
@@ -61,9 +61,9 @@
         <section class="panel-section">
           <div class="section-head">
             <p class="section-title">Trend</p>
-            <span class="subtle">PM2.5 / VOC / CO</span>
+            <span class="subtle">PM2.5 / VOC / CO z-score, EMA smoothing</span>
           </div>
-          <canvas id="userTrendCanvas" class="trend trend-compact" width="640" height="260"></canvas>
+          <canvas id="userTrendCanvas" class="trend trend-compact trend-fixed" width="640" height="260"></canvas>
         </section>
         <section class="panel-section">
           <p class="section-title">Nodes</p>

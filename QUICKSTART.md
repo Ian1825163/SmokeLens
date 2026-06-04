@@ -8,40 +8,79 @@
 | --- | --- | --- |
 | 只測 4 個開關與 LED | `tools/GpioButtonTest/GpioButtonTest.ino` | Serial 印出 0/1，GPIO32 接地時 LED 亮 |
 | 測完整 ESP32 感測器但不收進 DB | `SmokeLens.ino` + Arduino Serial Monitor | 每 1 秒印一行 JSON |
-| 用 USB Serial 收 CSV | `tools/SerialCsvLogger.ps1` | `data\serial\...csv` 自動分段產生 |
+| 用 USB Serial 收 CSV | `tools/SerialCsvLogger.ps1` | `data/serial/...csv` 自動分段產生 |
 | 穩定收資料進 SQLite | Mosquitto + backend + `SmokeLens.ino` | backend log 出現 `[data] ...`，DB 有資料 |
-| 匯出資料做分析 | backend export API 或 `npm.cmd run export:csv` | 產生 CSV |
+| 匯出資料做分析 | backend export API 或 `npm run export:csv` | 產生 CSV |
 
 ## 0.1 目前實測可用啟動流程
 
 這是目前最推薦的 demo / 收資料流程：MQTT 給 dashboard 即時顯示，USB Serial logger 同時把資料穩定存成 CSV。
 
+先開 terminal，切到 repo 根目錄：
+
+```bash
+cd /path/to/SmokeLens
+```
+
 Terminal 1: Mosquitto broker
 
+Windows PowerShell:
+
 ```powershell
-Get-Process mosquitto | Stop-Process -Force
-cd "C:\Users\ADMIN\Documents\NTU\Digital electronics\SmokeLens"
+mosquitto -c broker/mosquitto.conf -v
+```
+
+如果 `mosquitto` 不在 PATH，再改用安裝路徑：
+
+```powershell
 & "C:\Program Files\mosquitto\mosquitto.exe" -c broker\mosquitto.conf -v
+```
+
+macOS / Linux:
+
+```bash
+mosquitto -c broker/mosquitto.conf -v
 ```
 
 Terminal 2: backend + dashboard
 
+Windows PowerShell:
+
 ```powershell
-cd "C:\Users\ADMIN\Documents\NTU\Digital electronics\SmokeLens\backend"
+cd backend
 npm.cmd start
+```
+
+macOS / Linux:
+
+```bash
+cd backend
+npm start
 ```
 
 Terminal 3: USB Serial CSV logger
 
+Windows PowerShell:
+
 ```powershell
-cd "C:\Users\ADMIN\Documents\NTU\Digital electronics\SmokeLens"
 powershell -ExecutionPolicy Bypass -File .\tools\SerialCsvLogger.ps1 -Port COM11
 ```
+
+macOS:
+
+- 這個 repo 目前提供的是 PowerShell 版 `tools/SerialCsvLogger.ps1`。
+- 如果你的 Mac 已安裝 `pwsh`，可以這樣跑：
+
+```bash
+pwsh -File ./tools/SerialCsvLogger.ps1 -Port /dev/cu.usbserial-110
+```
+
+- 如果還沒裝 PowerShell，先用 `Mosquitto + backend + SmokeLens.ino` 這條主流程收資料即可。
 
 ESP32 插著筆電供電並跑 `SmokeLens.ino` 後：
 
 - MQTT 成功時，資料會進 backend / SQLite / dashboard。
-- Serial logger 會同步把每筆 JSON 存到 `data\serial\`。
+- Serial logger 會同步把每筆 JSON 存到 `data/serial/`。
 - 切換 mode 或 label 時，Serial logger 會自動收尾上一段 CSV 並開新檔。
 
 Dashboard:
@@ -162,7 +201,7 @@ Serial Monitor 會印出目前嘗試哪個 SSID：
 
 ESP32 的 `SMOKELENS_MQTT_SERVER` 要填「跑 Mosquitto 的筆電 WiFi IP」。
 
-PowerShell:
+Windows PowerShell:
 
 ```powershell
 Get-NetIPAddress -AddressFamily IPv4 |
@@ -174,6 +213,18 @@ Get-NetIPAddress -AddressFamily IPv4 |
 
 ```powershell
 ipconfig
+```
+
+macOS:
+
+```bash
+ifconfig | grep "inet "
+```
+
+如果你知道目前是 Wi-Fi 介面，也可以直接查：
+
+```bash
+ipconfig getifaddr en0
 ```
 
 找 Wi-Fi 的 IPv4，例如：
@@ -196,23 +247,38 @@ ESP32 和筆電必須在同一個 WiFi。
 
 重要：Arduino Serial Monitor 要關掉，因為同一個 COM port 不能同時被兩個程式打開。
 
-先列出 COM port：
+先列出 serial port：
+
+Windows PowerShell:
 
 ```powershell
-cd "C:\Users\ADMIN\Documents\NTU\Digital electronics\SmokeLens"
 powershell -ExecutionPolicy Bypass -File .\tools\SerialCsvLogger.ps1 -ListPorts
 ```
 
-假設 ESP32 是 `COM5`，開始記錄：
+macOS:
+
+```bash
+ls /dev/cu.*
+```
+
+假設 ESP32 是 Windows 的 `COM5` 或 macOS 的 `/dev/cu.usbserial-110`，開始記錄：
+
+Windows PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\SerialCsvLogger.ps1 -Port COM5
 ```
 
+macOS:
+
+```bash
+pwsh -File ./tools/SerialCsvLogger.ps1 -Port /dev/cu.usbserial-110
+```
+
 輸出會放在：
 
 ```text
-data\serial\
+data/serial/
 ```
 
 logger 會根據 `mode + label` 自動分段：
@@ -252,15 +318,30 @@ inference mode                     -> *_inference_inference.csv
 
 在 repo 根目錄：
 
+Windows PowerShell:
+
 ```powershell
-cd "C:\Users\ADMIN\Documents\NTU\Digital electronics\SmokeLens"
-& "C:\Program Files\mosquitto\mosquitto.exe" -c broker\mosquitto.conf -v
+mosquitto -c broker/mosquitto.conf -v
+```
+
+macOS / Linux:
+
+```bash
+mosquitto -c broker/mosquitto.conf -v
 ```
 
 確認 port：
 
+Windows PowerShell:
+
 ```powershell
 netstat -ano | Select-String ":1883"
+```
+
+macOS / Linux:
+
+```bash
+lsof -nP -iTCP:1883 -sTCP:LISTEN
 ```
 
 好的狀態會看到：
@@ -269,18 +350,29 @@ netstat -ano | Select-String ":1883"
 0.0.0.0:1883
 ```
 
-如果只看到 `127.0.0.1:1883`，ESP32 可能連不到。先關掉原本的 Mosquitto service/process，再用本 repo 的 `broker\mosquitto.conf` 啟動。
+如果只看到 `127.0.0.1:1883`，ESP32 可能連不到。先關掉原本的 Mosquitto service/process，再用本 repo 的 `broker/mosquitto.conf` 啟動。
 
 ### Terminal 2: Node.js backend
 
+Windows PowerShell:
+
 ```powershell
-cd "C:\Users\ADMIN\Documents\NTU\Digital electronics\SmokeLens\backend"
+cd backend
 npm.cmd install
 Copy-Item .env.example .env -Force
 npm.cmd start
 ```
 
-PowerShell 可能會擋 `npm.ps1`，所以這裡固定用 `npm.cmd`。
+macOS / Linux:
+
+```bash
+cd backend
+cp -n .env.example .env
+npm install
+npm start
+```
+
+PowerShell 可能會擋 `npm.ps1`，所以 Windows PowerShell 建議固定用 `npm.cmd`。
 
 預期 log：
 
@@ -316,7 +408,7 @@ http://localhost:3000/
 http://localhost:3000/admin
 ```
 
-節點地圖位置在 `backend\.env` 設定：
+節點地圖位置在 `backend/.env` 設定：
 
 ```text
 NODE_LOCATIONS_JSON={"node_01":{"name":"Node 01","lat":25.0173,"lng":121.5398,"radius_m":80}}
@@ -328,10 +420,20 @@ NODE_LOCATIONS_JSON={"node_01":{"name":"Node 01","lat":25.0173,"lng":121.5398,"r
 
 backend 啟動後：
 
+Windows PowerShell:
+
 ```powershell
 Invoke-RestMethod http://localhost:3000/api/health
 Invoke-RestMethod http://localhost:3000/api/latest
 Invoke-RestMethod "http://localhost:3000/api/history?node_id=node_01&limit=20"
+```
+
+macOS / Linux:
+
+```bash
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/latest
+curl "http://localhost:3000/api/history?node_id=node_01&limit=20"
 ```
 
 瀏覽器可以直接開：
@@ -371,8 +473,8 @@ http://localhost:3000/admin
 每 1 秒一筆資料，所以：
 
 ```text
-10 分鐘約 120 筆
-20 分鐘約 240 筆
+10 分鐘約 600 筆
+20 分鐘約 1200 筆
 ```
 
 建議每個情境收 10-20 分鐘，先不要一直切換 label。
@@ -403,15 +505,27 @@ http://localhost:3000/api/export.csv
 
 命令列方式：
 
+Windows PowerShell:
+
 ```powershell
-cd "C:\Users\ADMIN\Documents\NTU\Digital electronics\SmokeLens\backend"
+cd backend
 npm.cmd run export:csv
 ```
 
 指定輸出檔名：
 
+Windows PowerShell:
+
 ```powershell
 npm.cmd run export:csv -- ..\data\smokelens_export.csv
+```
+
+macOS / Linux:
+
+```bash
+cd backend
+npm run export:csv
+npm run export:csv -- ../data/smokelens_export.csv
 ```
 
 `data/*.csv` 會被 git ignore，適合放實驗資料。
@@ -420,11 +534,18 @@ npm.cmd run export:csv -- ..\data\smokelens_export.csv
 
 ### `npm` 被 PowerShell 擋住
 
-改用：
+Windows PowerShell 改用：
 
 ```powershell
 npm.cmd install
 npm.cmd start
+```
+
+macOS / Linux 直接用：
+
+```bash
+npm install
+npm start
 ```
 
 ### ESP32 顯示 `MQTT failed, state=-2`

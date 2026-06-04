@@ -65,6 +65,7 @@ function registerRoutes(app, wss, store) {
         "/api/config",
         "/api/health",
         "/api/latest",
+        "/api/baseline?collection_label=normal_air",
         "/api/history?node_id=node_01&limit=100",
         "/api/status",
         "/api/export.csv"
@@ -94,6 +95,16 @@ function registerRoutes(app, wss, store) {
   app.get("/api/latest", (req, res) => {
     res.json({
       data: store.latestReadings()
+    });
+  });
+
+  app.get("/api/baseline", (req, res) => {
+    res.json({
+      data: store.baselineSummary({
+        nodeId: req.query.node_id,
+        mode: req.query.mode,
+        collectionLabel: req.query.collection_label
+      })
     });
   });
 

@@ -75,6 +75,78 @@ GET http://localhost:3000/
 GET http://localhost:3000/admin
 ```
 
+## Quick Start
+
+先開 terminal，切到 repo 根目錄：
+
+```bash
+cd /path/to/SmokeLens
+```
+
+Terminal 1: Mosquitto broker
+
+Windows PowerShell:
+
+```powershell
+mosquitto -c broker/mosquitto.conf -v
+```
+
+如果 `mosquitto` 不在 PATH，再改用安裝路徑：
+
+```powershell
+& "C:\Program Files\mosquitto\mosquitto.exe" -c broker\mosquitto.conf -v
+```
+
+macOS / Linux:
+
+```bash
+mosquitto -c broker/mosquitto.conf -v
+```
+
+Terminal 2: backend + dashboard
+
+Windows PowerShell:
+
+```powershell
+cd backend
+npm.cmd install
+Copy-Item .env.example .env -Force
+npm.cmd start
+```
+
+macOS / Linux:
+
+```bash
+cd backend
+cp -n .env.example .env
+npm install
+npm start
+```
+
+Terminal 3: ESP32
+
+1. 確認 `arduino_secrets.h` 的 WiFi 與 MQTT IP 正確
+2. Upload `SmokeLens.ino`
+3. 打開 Serial Monitor，設 `115200 baud`
+
+常用檢查：
+
+Windows PowerShell:
+
+```powershell
+Invoke-RestMethod http://localhost:3000/api/health
+Invoke-RestMethod http://localhost:3000/api/latest
+```
+
+macOS / Linux:
+
+```bash
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/latest
+```
+
+更完整的跨平台收資料步驟請看 `QUICKSTART.md`。
+
 ## Local Files
 
 這些檔案是本機設定或產生資料，不會 push 到 GitHub：
