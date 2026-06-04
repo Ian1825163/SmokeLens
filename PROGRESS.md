@@ -1,9 +1,26 @@
-# SmokeLens Next Session Plan
+# SmokeLens Progress And Next Plan
 
-Updated: 2026-05-22
+Updated: 2026-05-28
 
-This file is the handoff plan for the next work session. Follow the steps from
-top to bottom to continue without reconstructing today's context.
+Current branch:
+
+```text
+main
+```
+
+This file is the handoff plan for the next work session. For test commands and
+data collection checklists, start from `QUICKSTART.md`.
+
+Current working run flow:
+
+```text
+Terminal 1: Mosquitto with broker/mosquitto.conf
+Terminal 2: backend npm.cmd start
+Terminal 3: tools/SerialCsvLogger.ps1 -Port COM11
+ESP32: plugged into laptop, running SmokeLens.ino
+```
+
+This records data through both MQTT/dashboard and USB Serial CSV when MQTT is available.
 
 ## 0. Today Summary
 
@@ -25,69 +42,25 @@ Completed today:
 - `data/smokelens.sqlite` was created successfully.
 - WiFi/MQTT secrets were moved out of `SmokeLens.ino` into ignored `arduino_secrets.h`.
 - `arduino_secrets.example.h` was added as the committed template.
-- ML work is now on the `ml` branch.
-- Python ML scripts were added under `ml/`:
-  - `ml/scripts/prepare_dataset.py`
-  - `ml/scripts/train_mlp.py`
-  - `ml/requirements-ml.txt`
-  - `ml/README.md`
-- A local Python virtual environment was created at `.env/` and is ignored by git.
-- ML dependencies were installed in `.env/`:
-  - `scikit-learn`
-  - `joblib`
-  - `numpy`
-  - `scipy`
-- MLP input was changed from 9 to 7 dimensions. `voc_raw` and `co_raw` are
-  still stored in SQLite for debugging, but ML training keeps the millivolt
-  versions to avoid redundant raw/mV pairs.
-  Current MLP input features:
-  - `voc_mv`
-  - `co_mv`
-  - `pm1_0`
-  - `pm2_5`
-  - `pm10`
-  - `temperature`
-  - `humidity`
-- `pms_valid` is kept in the database but is not an MLP input. Rows with
-  `pms_valid != 1` should be excluded from training.
-- Classification labels were changed to integer classes:
-  - `0` = normal air
-  - `1` = cooking oil fume
-  - `2` = car exhaust
-  - `3` = smoke smell
-  - `NULL` = unlabeled
-- Backend classification storage was changed from text labels such as
-  `unclassified` to integer classes `0`-`3` or `NULL`.
-- The planned MLP architecture is currently:
-  - input: 7
-  - hidden layers: `16`
-  - output classes: 4
-  - normalization: `StandardScaler` in the Python training pipeline
-- Dataset CSV column order is:
-  - 7 input features
-  - `label_index`
-  - `label`
-- `label_index` is the model target. `label` is kept as the final column for
-  human-readable inspection.
-- A local fake database was created for pipeline testing:
-  - `data/smokelens_fake.sqlite`
-  - 80 usable rows
-  - 20 rows per class
-  - ignored by git
-- Fake generated `ml/datasets/train.csv` and `ml/datasets/test.csv` are also
-  ignored by git. The real default input for `prepare_dataset.py` remains
-  `data/smokelens.sqlite`; use `--db data/smokelens_fake.sqlite` only for local
-  testing.
+
+Button/mode feature work completed and merged:
+
+- Added ESP32 button-controlled mode switching.
+- Added firmware JSON fields for data collection labels and inference output.
+- Added LED 1 alert output for cigarette detection in inference mode.
+- Added backend database/CSV columns for mode, labels, inference class, score, and model version.
+- Added `QUICKSTART.md` so GPIO tests, data collection, backend startup, and CSV export commands are easier to find.
+- Added multi-WiFi firmware configuration through `SMOKELENS_WIFI_CREDENTIALS`, while keeping the old single-WiFi macros compatible.
+- Added `tools/SerialCsvLogger.ps1` for USB Serial data collection without MQTT, with automatic CSV splitting by mode/label segment.
+- Added web dashboards:
+  - `/` for user-facing smoke area status on a Leaflet/OpenStreetMap view.
+  - `/admin` for developer telemetry, node status, trend, and live feed.
 
 Important local-only files:
 
 - `arduino_secrets.h` contains local WiFi/MQTT values and is ignored by git.
 - `backend/.env` contains local backend settings and is ignored by git.
 - `data/smokelens.sqlite` is generated data and is ignored by git.
-- `.env/` contains the local Python virtual environment and is ignored by git.
-- `ml/datasets/*.csv` contains generated train/test CSV files and is ignored by git.
-- `ml/models/*.joblib` and `ml/models/*.json` contain trained model artifacts
-  and are ignored by git for now.
 
 ## 1. Current Architecture
 
@@ -118,6 +91,9 @@ Firmware:
 
 - `SmokeLens.ino`
 - `arduino_secrets.example.h`
+- `QUICKSTART.md`
+- `tools/SerialCsvLogger.ps1`
+- `tools/GpioButtonTest/GpioButtonTest.ino`
 - local ignored file: `arduino_secrets.h`
 
 Broker:
@@ -135,28 +111,59 @@ Backend:
 - `backend/src/csv.js`
 - `backend/scripts/export-csv.js`
 - `backend/.env.example`
+- `backend/public/`
 - local ignored file: `backend/.env`
 
 Data:
 
 - generated DB: `data/smokelens.sqlite`
 
-ML:
+## 2.1 Button/LED Mapping
 
-- `ml/README.md`
-- `ml/requirements-ml.txt`
-- `ml/scripts/prepare_dataset.py`
-- `ml/scripts/train_mlp.py`
-- generated train/test CSV: `ml/datasets/train.csv`, `ml/datasets/test.csv`
-- generated model artifacts:
-  - `ml/models/smokelens_mlp.joblib`
-  - `ml/models/smokelens_mlp_metadata.json`
+| Control | ESP32 Pin | Open / pullup | Connected to GND |
+| --- | --- | --- | --- |
+| Button 1 | GPIO 32 | Inference | Data collection |
+| Button 3 | GPIO 33 | Normal air | Oil/cooking fume label |
+| Button 5 | GPIO 25 | Normal air | Vehicle exhaust label |
+| Button 8 | GPIO 26 | Normal air | Cigarette label |
+| LED 1 | GPIO 27 | Cigarette detected in inference mode | Off |
 
-Current ML branch:
+If multiple label buttons are HIGH, current priority is:
 
 ```text
-ml
+cigarette_smoke > vehicle_exhaust > cooking_fume > normal_air
 ```
+
+Current inference model:
+
+```text
+rule_fallback_v0
+```
+
+This is a placeholder until trained model parameters are exported to firmware.
+
+## 2.2 GPIO Button Test Sketch
+
+Before testing full firmware, use:
+
+```text
+tools/GpioButtonTest/GpioButtonTest.ino
+```
+
+Arduino IDE setup:
+
+1. Open the test sketch directly.
+2. Upload to ESP32.
+3. Open Serial Monitor at `115200`.
+
+Expected:
+
+- GPIO32 connected to GND prints `mode=data_collection` and turns LED 1 on.
+- GPIO32 open prints `mode=inference` and turns LED 1 off.
+- GPIO33 connected to GND prints `label=cooking_fume`.
+- GPIO25 connected to GND prints `label=vehicle_exhaust`.
+- GPIO26 connected to GND prints `label=cigarette_smoke`.
+- All label inputs open prints `label=normal_air`.
 
 ## 3. Start-Of-Session Checklist
 
@@ -279,13 +286,13 @@ Expected Serial:
 Expected JSON:
 
 ```json
-{"node_id":"node_01","timestamp":1716000000,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
+{"node_id":"node_01","timestamp":1716000000,"mode":"inference","collection_label":null,"model_version":"rule_fallback_v0","inference_class":"normal_air","cigarette_detected":false,"inference_score":0,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
 ```
 
 Expected backend log:
 
 ```text
-[data] node_01 ts=... voc=... co=... pm25=... pms=true
+[data] node_01 mode=inference label=- infer=normal_air ts=... voc=... co=... pm25=... pms=true
 ```
 
 ## 7. Verify API And Database
@@ -347,78 +354,28 @@ New-NetFirewallRule -DisplayName "SmokeLens MQTT 1883" -Direction Inbound -Proto
 
 Do these after the full pipeline is confirmed:
 
-1. Add a labeling workflow for SQLite rows.
-   - Need a script or API to mark time ranges with `classification = 0..3`.
-   - Suggested classes:
-     - `0` = normal air
-     - `1` = cooking oil fume
-     - `2` = car exhaust
-     - `3` = smoke smell
-2. Collect labeled data for each class.
-   - Keep each experiment sequence clear, for example:
-     - normal air
-     - exposure state
-     - recovery back to normal air
-3. Export/prepare train and test data:
-
-```bash
-.env/bin/python ml/scripts/prepare_dataset.py
-```
-
-This reads `data/smokelens.sqlite`, filters rows where:
-
-- `pms_valid = 1`
-- `classification` is one of `0`, `1`, `2`, `3`
-- all 7 MLP input features are non-null
-
-Then it writes:
-
-```text
-ml/datasets/train.csv
-ml/datasets/test.csv
-```
-
-CSV format:
-
-```text
-voc_mv,co_mv,pm1_0,pm2_5,pm10,temperature,humidity,label_index,label
-```
-
-`label_index` is used by training. `label` is for human inspection and should
-stay as the final column.
-
-4. Train the MLP:
-
-```bash
-.env/bin/python ml/scripts/train_mlp.py
-```
-
-This writes:
-
-```text
-ml/models/smokelens_mlp.joblib
-ml/models/smokelens_mlp_metadata.json
-```
-
-5. Inspect ranges and class balance for:
-   - `voc_mv`
-   - `co_mv`
-   - `pm1_0`
+1. Test button GPIO states in Serial JSON.
+2. Confirm Button 1 switches `mode` between `inference` and `data_collection`.
+3. Confirm Button 3/5/8 produce `collection_label` values in data collection mode.
+4. Confirm LED 1 turns on only in inference mode when `cigarette_detected:true`.
+5. Collect 10-20 minutes of normal-air baseline data.
+6. Export CSV and inspect ranges for:
+   - `voc_raw`
+   - `co_raw`
    - `pm2_5`
-   - `pm10`
-   - `temperature`
-   - `humidity`
-6. Build a minimal dashboard page:
+   - temperature/humidity
+7. Replace `rule_fallback_v0` with trained model parameters once available.
+8. Add a simple baseline summary endpoint or script.
+9. Build a minimal dashboard page:
    - latest values
    - node online/offline
    - simple trend chart
-7. After a stable demo model exists, optionally commit one named model artifact,
-   for example `smokelens_mlp_demo_v1.joblib`.
-8. Later add an export script to convert the trained MLP into an Arduino header:
-   - scaler mean/std arrays
-   - dense layer weight arrays
-   - dense layer bias arrays
-   - ESP32 inference helper
+10. Later collect labeled scenarios:
+   - normal air
+   - cigarette smoke or incense substitute
+   - cooking fume
+   - vehicle exhaust
+11. Then train SVM-RBF from exported CSV.
 
 ## 10. Commit/Push Notes
 
@@ -437,10 +394,6 @@ Files that should not be committed:
 - `backend/.env`
 - `backend/node_modules/`
 - `data/*.sqlite`
-- `.env/`
-- `ml/datasets/*.csv`
-- `ml/models/*.joblib`
-- `ml/models/*.json`
 - `.pio/`
 
 Before push:

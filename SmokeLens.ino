@@ -21,11 +21,11 @@
 #endif
 
 #ifndef SMOKELENS_WIFI_SSID
-#define SMOKELENS_WIFI_SSID "YOUR_SSID"
+#define SMOKELENS_WIFI_SSID "YOUR_WIFI_SSID"
 #endif
 
 #ifndef SMOKELENS_WIFI_PASSWORD
-#define SMOKELENS_WIFI_PASSWORD "YOUR_PASSWORD"
+#define SMOKELENS_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 #endif
 
 #ifndef SMOKELENS_MQTT_SERVER
@@ -36,12 +36,25 @@
 #define SMOKELENS_NODE_ID "node_01"
 #endif
 
+#ifndef SMOKELENS_WIFI_CREDENTIALS
+#define SMOKELENS_WIFI_CREDENTIALS \
+  { { SMOKELENS_WIFI_SSID, SMOKELENS_WIFI_PASSWORD } }
+#endif
+
 // =========================
 // User configuration
 // =========================
-const char *WIFI_SSID = SMOKELENS_WIFI_SSID;
-const char *WIFI_PASSWORD = SMOKELENS_WIFI_PASSWORD;
+struct WiFiCredential {
+  const char *ssid;
+  const char *password;
+  const char *mqttServer;
+};
 
+const WiFiCredential WIFI_CREDENTIALS[] = SMOKELENS_WIFI_CREDENTIALS;
+const size_t WIFI_CREDENTIAL_COUNT =
+    sizeof(WIFI_CREDENTIALS) / sizeof(WIFI_CREDENTIALS[0]);
+
+const char *DEFAULT_MQTT_SERVER = SMOKELENS_MQTT_SERVER;
 const char *MQTT_SERVER = SMOKELENS_MQTT_SERVER;
 const uint16_t MQTT_PORT = 1883;
 const char *NODE_ID = SMOKELENS_NODE_ID;
@@ -61,13 +74,21 @@ const uint8_t MQ7_PIN = 39;    // CO,  ADC1_CH3, VN
 const int PMS_RX_PIN = 16;  // ESP32 UART2 RX, connect to PMS5003T TX
 const int PMS_TX_PIN = 17;  // Not connected, kept for UART2 init
 
+const uint8_t MODE_BUTTON_PIN = 32;       // GND=data collection, open=inference
+const uint8_t COOKING_BUTTON_PIN = 33;    // GND=cooking fume label
+const uint8_t EXHAUST_BUTTON_PIN = 25;    // GND=vehicle exhaust label
+const uint8_t CIGARETTE_BUTTON_PIN = 26;  // GND=cigarette smoke label
+
+const uint8_t CIGARETTE_LED_PIN = 27;
+
 // =========================
 // Runtime constants
 // =========================
 const uint32_t SERIAL_BAUD = 115200;
 const uint32_t PMS_BAUD = 9600;
-const uint32_t SAMPLE_INTERVAL_MS = 5000UL;
-const uint32_t WIFI_RETRY_INTERVAL_MS = 5000UL;
+const uint32_t SAMPLE_INTERVAL_MS = 1000UL;
+const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000UL;
+const uint32_t WIFI_STATUS_PRINT_INTERVAL_MS = 5000UL;
 const uint32_t MQTT_RETRY_INTERVAL_MS = 5000UL;
 const uint32_t PMS_READ_TIMEOUT_MS = 1500UL;
 
@@ -75,15 +96,27 @@ const uint8_t ADC_SAMPLE_COUNT = 10;
 const uint16_t PMS_FRAME_SIZE = 32;
 const uint16_t PMS_PAYLOAD_LENGTH = 28;
 
+const char *INFERENCE_MODEL_VERSION = "rule_fallback_v0";
+
+// Placeholder thresholds until trained model parameters are exported to firmware.
+const uint16_t MODEL_VOC_RAW_THRESHOLD = 900;
+const uint16_t MODEL_CO_RAW_THRESHOLD = 800;
+const float MODEL_PM25_THRESHOLD = 25.0f;
+const float MODEL_CIGARETTE_SCORE_THRESHOLD = 0.65f;
+
 HardwareSerial pmsSerial(2);
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
 char mqttTopic[96];
 uint32_t lastWiFiAttemptMs = 0;
+uint32_t lastWiFiStatusPrintMs = 0;
 uint32_t lastMQTTAttemptMs = 0;
 uint32_t lastSampleMs = 0;
+int currentWiFiCredentialIndex = -1;
 bool timeConfigured = false;
+bool wifiWasConnected = false;
+bool mqttTcpDiagnosticPrinted = false;
 
 struct PMS5003TData {
   bool valid;
@@ -94,10 +127,200 @@ struct PMS5003TData {
   float humidity;
 };
 
+enum class NodeMode {
+  Inference,
+  DataCollection
+};
+
+enum class CollectionLabel {
+  NormalAir,
+  CookingFume,
+  VehicleExhaust,
+  CigaretteSmoke
+};
+
+struct ButtonSnapshot {
+  bool dataCollectionMode;
+  bool cookingFume;
+  bool vehicleExhaust;
+  bool cigaretteSmoke;
+};
+
+struct InferenceResult {
+  bool cigaretteDetected;
+  float score;
+  const char *classification;
+};
+
+const char *modeToString(NodeMode mode) {
+  return mode == NodeMode::DataCollection ? "data_collection" : "inference";
+}
+
+const char *labelToString(CollectionLabel label) {
+  switch (label) {
+    case CollectionLabel::CookingFume:
+      return "cooking_fume";
+    case CollectionLabel::VehicleExhaust:
+      return "vehicle_exhaust";
+    case CollectionLabel::CigaretteSmoke:
+      return "cigarette_smoke";
+    case CollectionLabel::NormalAir:
+    default:
+      return "normal_air";
+  }
+}
+
+CollectionLabel selectedCollectionLabel(const ButtonSnapshot &buttons) {
+  if (buttons.cigaretteSmoke) {
+    return CollectionLabel::CigaretteSmoke;
+  }
+  if (buttons.vehicleExhaust) {
+    return CollectionLabel::VehicleExhaust;
+  }
+  if (buttons.cookingFume) {
+    return CollectionLabel::CookingFume;
+  }
+  return CollectionLabel::NormalAir;
+}
+
+void setupButtonsAndLED() {
+  pinMode(MODE_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(COOKING_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(EXHAUST_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(CIGARETTE_BUTTON_PIN, INPUT_PULLUP);
+
+  pinMode(CIGARETTE_LED_PIN, OUTPUT);
+  digitalWrite(CIGARETTE_LED_PIN, LOW);
+}
+
+ButtonSnapshot readButtons() {
+  ButtonSnapshot buttons;
+  buttons.dataCollectionMode = digitalRead(MODE_BUTTON_PIN) == LOW;
+  buttons.cookingFume = digitalRead(COOKING_BUTTON_PIN) == LOW;
+  buttons.vehicleExhaust = digitalRead(EXHAUST_BUTTON_PIN) == LOW;
+  buttons.cigaretteSmoke = digitalRead(CIGARETTE_BUTTON_PIN) == LOW;
+  return buttons;
+}
+
+float normalizedExcess(float value, float threshold) {
+  if (threshold <= 0.0f || value <= threshold) {
+    return 0.0f;
+  }
+  const float excess = (value - threshold) / threshold;
+  return constrain(excess, 0.0f, 1.0f);
+}
+
+InferenceResult runCigaretteInference(uint16_t vocRaw, uint16_t coRaw,
+                                      const PMS5003TData &pms) {
+  const float pm25 = pms.valid ? static_cast<float>(pms.pm2_5) : 0.0f;
+  const float vocScore = normalizedExcess(vocRaw, MODEL_VOC_RAW_THRESHOLD);
+  const float coScore = normalizedExcess(coRaw, MODEL_CO_RAW_THRESHOLD);
+  const float pmScore = normalizedExcess(pm25, MODEL_PM25_THRESHOLD);
+  const float score = (0.45f * vocScore) + (0.35f * coScore) + (0.20f * pmScore);
+
+  InferenceResult result;
+  result.score = score;
+  result.cigaretteDetected =
+      score >= MODEL_CIGARETTE_SCORE_THRESHOLD ||
+      (vocRaw >= MODEL_VOC_RAW_THRESHOLD && coRaw >= MODEL_CO_RAW_THRESHOLD &&
+       pm25 >= MODEL_PM25_THRESHOLD);
+  result.classification =
+      result.cigaretteDetected ? "cigarette_smoke" : "normal_air";
+  return result;
+}
+
+bool mqttServerValueLooksValid(const char *server) {
+  return server != nullptr && strlen(server) > 0 &&
+         strcmp(server, "192.168.x.x") != 0 &&
+         strcmp(server, "YOUR_LAPTOP_WIFI_IP") != 0;
+}
+
+const char *mqttServerForCredential(const WiFiCredential &credential) {
+  if (mqttServerValueLooksValid(credential.mqttServer)) {
+    return credential.mqttServer;
+  }
+  return DEFAULT_MQTT_SERVER;
+}
+
+bool wifiCredentialLooksValid(const WiFiCredential &credential) {
+  return strlen(credential.ssid) > 0 &&
+         strcmp(credential.ssid, "YOUR_SSID") != 0 &&
+         strcmp(credential.ssid, "YOUR_WIFI_SSID") != 0 &&
+         strcmp(credential.password, "YOUR_PASSWORD") != 0 &&
+         strcmp(credential.password, "YOUR_WIFI_PASSWORD") != 0;
+}
+
+bool wifiCredentialConfigLooksValid(const WiFiCredential &credential) {
+  return wifiCredentialLooksValid(credential) &&
+         mqttServerValueLooksValid(mqttServerForCredential(credential));
+}
+
+int nextValidWiFiCredentialIndex() {
+  if (WIFI_CREDENTIAL_COUNT == 0) {
+    return -1;
+  }
+
+  const size_t baseIndex = currentWiFiCredentialIndex < 0
+                               ? WIFI_CREDENTIAL_COUNT - 1
+                               : static_cast<size_t>(currentWiFiCredentialIndex);
+
+  for (size_t offset = 1; offset <= WIFI_CREDENTIAL_COUNT; ++offset) {
+    const size_t candidateIndex = (baseIndex + offset) % WIFI_CREDENTIAL_COUNT;
+    if (wifiCredentialConfigLooksValid(WIFI_CREDENTIALS[candidateIndex])) {
+      return static_cast<int>(candidateIndex);
+    }
+  }
+
+  return -1;
+}
+
 bool wifiConfigLooksValid() {
-  return ENABLE_WIFI_MQTT && strlen(WIFI_SSID) > 0 &&
-         strcmp(WIFI_SSID, "YOUR_SSID") != 0 &&
-         strcmp(MQTT_SERVER, "192.168.x.x") != 0;
+  return ENABLE_WIFI_MQTT && nextValidWiFiCredentialIndex() >= 0;
+}
+
+void printNetworkDetails() {
+  Serial.print("# WiFi connected ssid=");
+  Serial.print(WiFi.SSID());
+  Serial.print(" ip=");
+  Serial.print(WiFi.localIP());
+  Serial.print(" gateway=");
+  Serial.print(WiFi.gatewayIP());
+  Serial.print(" subnet=");
+  Serial.print(WiFi.subnetMask());
+  Serial.print(" rssi=");
+  Serial.print(WiFi.RSSI());
+  Serial.print(" mqtt_server=");
+  Serial.println(MQTT_SERVER);
+}
+
+bool testMQTTTcpConnect() {
+  WiFiClient testClient;
+  const bool connected = testClient.connect(MQTT_SERVER, MQTT_PORT);
+  if (connected) {
+    testClient.stop();
+  }
+  return connected;
+}
+
+const char *wifiStatusToString(wl_status_t status) {
+  switch (status) {
+    case WL_IDLE_STATUS:
+      return "WL_IDLE_STATUS";
+    case WL_NO_SSID_AVAIL:
+      return "WL_NO_SSID_AVAIL";
+    case WL_SCAN_COMPLETED:
+      return "WL_SCAN_COMPLETED";
+    case WL_CONNECTED:
+      return "WL_CONNECTED";
+    case WL_CONNECT_FAILED:
+      return "WL_CONNECT_FAILED";
+    case WL_CONNECTION_LOST:
+      return "WL_CONNECTION_LOST";
+    case WL_DISCONNECTED:
+      return "WL_DISCONNECTED";
+    default:
+      return "WL_UNKNOWN";
+  }
 }
 
 uint16_t readU16BE(const uint8_t *buffer, size_t index) {
@@ -232,33 +455,87 @@ PMS5003TData readPMS5003T() {
   return latest;
 }
 
+void startWiFiAttempt() {
+  const int nextIndex = nextValidWiFiCredentialIndex();
+  if (nextIndex < 0) {
+    Serial.println("# WiFi skipped: update WiFi credentials and MQTT servers first");
+    return;
+  }
+
+  currentWiFiCredentialIndex = nextIndex;
+  const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+  MQTT_SERVER = mqttServerForCredential(credential);
+
+  if (mqtt.connected()) {
+    mqtt.disconnect();
+  }
+  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+  WiFi.disconnect(false);
+  WiFi.begin(credential.ssid, credential.password);
+  lastWiFiAttemptMs = millis();
+  lastWiFiStatusPrintMs = lastWiFiAttemptMs;
+  mqttTcpDiagnosticPrinted = false;
+  wifiWasConnected = false;
+
+  Serial.print("# WiFi connecting to ");
+  Serial.print(credential.ssid);
+  Serial.print(" (");
+  Serial.print(currentWiFiCredentialIndex + 1);
+  Serial.print("/");
+  Serial.print(WIFI_CREDENTIAL_COUNT);
+  Serial.print(") mqtt=");
+  Serial.println(MQTT_SERVER);
+}
+
 void beginWiFi() {
-  if (!wifiConfigLooksValid()) {
-    Serial.println("# WiFi/MQTT skipped: update WIFI_SSID and MQTT_SERVER first");
+  if (!ENABLE_WIFI_MQTT) {
+    Serial.println("# WiFi/MQTT skipped: disabled in firmware");
     return;
   }
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  lastWiFiAttemptMs = millis();
-  Serial.print("# WiFi connecting to ");
-  Serial.println(WIFI_SSID);
+  startWiFiAttempt();
 }
 
 void maintainWiFi() {
-  if (!wifiConfigLooksValid() || WiFi.status() == WL_CONNECTED) {
+  if (!wifiConfigLooksValid()) {
     return;
   }
 
-  if (millis() - lastWiFiAttemptMs < WIFI_RETRY_INTERVAL_MS) {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wifiWasConnected) {
+      wifiWasConnected = true;
+      mqttTcpDiagnosticPrinted = false;
+      printNetworkDetails();
+    }
     return;
   }
 
-  lastWiFiAttemptMs = millis();
-  Serial.println("# WiFi reconnecting");
-  WiFi.disconnect();
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  if (wifiWasConnected) {
+    wifiWasConnected = false;
+    timeConfigured = false;
+    Serial.println("# WiFi disconnected");
+  }
+
+  const uint32_t elapsedMs = millis() - lastWiFiAttemptMs;
+
+  if (millis() - lastWiFiStatusPrintMs >= WIFI_STATUS_PRINT_INTERVAL_MS) {
+    lastWiFiStatusPrintMs = millis();
+    Serial.print("# WiFi waiting status=");
+    Serial.print(wifiStatusToString(WiFi.status()));
+    Serial.print(" elapsed_s=");
+    Serial.println(elapsedMs / 1000UL);
+  }
+
+  if (elapsedMs < WIFI_CONNECT_TIMEOUT_MS) {
+    return;
+  }
+
+  Serial.print("# WiFi connect timeout status=");
+  Serial.println(wifiStatusToString(WiFi.status()));
+  Serial.println("# WiFi trying next saved network");
+  startWiFiAttempt();
 }
 
 void setupTimeIfNeeded() {
@@ -308,6 +585,12 @@ void maintainMQTT() {
   Serial.print(MQTT_SERVER);
   Serial.print(':');
   Serial.println(MQTT_PORT);
+
+  if (!mqttTcpDiagnosticPrinted) {
+    mqttTcpDiagnosticPrinted = true;
+    Serial.print("# MQTT TCP diagnostic ");
+    Serial.println(testMQTTTcpConnect() ? "ok" : "failed");
+  }
 
   if (mqtt.connect(NODE_ID)) {
     Serial.println("# MQTT connected");
@@ -360,23 +643,53 @@ void addPMSJsonFields(JsonObject doc, const PMS5003TData &pms) {
 }
 
 void sampleAndPublish() {
+  ButtonSnapshot buttons = readButtons();
+  const NodeMode mode =
+      buttons.dataCollectionMode ? NodeMode::DataCollection : NodeMode::Inference;
+  const CollectionLabel collectionLabel = selectedCollectionLabel(buttons);
+
   uint16_t vocRaw = readADCAverage(MQ135_PIN);
   uint16_t coRaw = readADCAverage(MQ7_PIN);
   uint16_t vocMilliVolt = readMilliVoltAverage(MQ135_PIN);
   uint16_t coMilliVolt = readMilliVoltAverage(MQ7_PIN);
   PMS5003TData pms = readPMS5003T();
 
-  StaticJsonDocument<384> doc;
+  InferenceResult inference = runCigaretteInference(vocRaw, coRaw, pms);
+  const bool ledOn =
+      mode == NodeMode::Inference && inference.cigaretteDetected;
+  digitalWrite(CIGARETTE_LED_PIN, ledOn ? HIGH : LOW);
+
+  StaticJsonDocument<768> doc;
   JsonObject root = doc.to<JsonObject>();
   root["node_id"] = NODE_ID;
   root["timestamp"] = currentTimestampSeconds();
+  root["mode"] = modeToString(mode);
+  root["collection_label"] =
+      mode == NodeMode::DataCollection ? labelToString(collectionLabel) : nullptr;
+  root["model_version"] = INFERENCE_MODEL_VERSION;
+  root["inference_class"] =
+      mode == NodeMode::Inference ? inference.classification : nullptr;
+  root["cigarette_detected"] =
+      mode == NodeMode::Inference ? inference.cigaretteDetected : false;
+  if (mode == NodeMode::Inference) {
+    root["inference_score"] = inference.score;
+  } else {
+    root["inference_score"] = nullptr;
+  }
   root["voc_raw"] = vocRaw;
   root["co_raw"] = coRaw;
   root["voc_mv"] = vocMilliVolt;
   root["co_mv"] = coMilliVolt;
   addPMSJsonFields(root, pms);
 
-  char payload[384];
+  JsonObject buttonJson = root.createNestedObject("buttons");
+  buttonJson["mode_data_collection"] = buttons.dataCollectionMode;
+  buttonJson["cooking_fume"] = buttons.cookingFume;
+  buttonJson["vehicle_exhaust"] = buttons.vehicleExhaust;
+  buttonJson["cigarette_smoke"] = buttons.cigaretteSmoke;
+  buttonJson["led_cigarette"] = ledOn;
+
+  char payload[768];
   size_t payloadLength = serializeJson(root, payload, sizeof(payload));
   Serial.println(payload);
 
@@ -396,6 +709,7 @@ void setup() {
   snprintf(mqttTopic, sizeof(mqttTopic), "smokelens/%s/data", NODE_ID);
 
   setupADC();
+  setupButtonsAndLED();
   pmsSerial.setRxBufferSize(512);
   pmsSerial.begin(PMS_BAUD, SERIAL_8N1, PMS_RX_PIN, PMS_TX_PIN);
 

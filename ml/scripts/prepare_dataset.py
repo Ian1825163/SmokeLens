@@ -23,11 +23,22 @@ FEATURE_COLUMNS = [
     "humidity",
 ]
 
-INDEX_TO_LABEL = {
-    0: "normal",
-    1: "cooking_oil",
-    2: "car_exhaust",
-    3: "smoke_smell",
+LABEL_TO_INDEX = {
+    "normal_air": 0,
+    "cooking_fume": 1,
+    "vehicle_exhaust": 2,
+    "cigarette_smoke": 3,
+}
+
+LEGACY_LABEL_ALIASES = {
+    "normal": "normal_air",
+    "cooking_oil": "cooking_fume",
+    "car_exhaust": "vehicle_exhaust",
+    "smoke_smell": "cigarette_smoke",
+    "0": "normal_air",
+    "1": "cooking_fume",
+    "2": "vehicle_exhaust",
+    "3": "cigarette_smoke",
 }
 
 OUTPUT_COLUMNS = FEATURE_COLUMNS + ["label_index", "label"]
@@ -59,15 +70,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def normalize_classification(value: object) -> tuple[str, int] | None:
+def normalize_label(value: object) -> tuple[str, int] | None:
     if value is None:
         return None
-    try:
-        label_index = int(value)
-    except (TypeError, ValueError):
+
+    text = str(value).strip()
+    if not text:
         return None
-    label = INDEX_TO_LABEL.get(label_index)
-    if label is None:
+
+    label = LEGACY_LABEL_ALIASES.get(text, text)
+    label_index = LABEL_TO_INDEX.get(label)
+    if label_index is None:
         return None
     return label, label_index
 
@@ -81,7 +94,12 @@ def load_rows(db_path: Path) -> list[dict[str, object]]:
         raise FileNotFoundError(f"Database not found: {db_path}")
 
     query = f"""
-        SELECT {", ".join(FEATURE_COLUMNS)}, pms_valid, classification
+        SELECT
+            {", ".join(FEATURE_COLUMNS)},
+            mode,
+            collection_label,
+            classification,
+            pms_valid
         FROM readings
         WHERE pms_valid = 1
     """
@@ -90,11 +108,15 @@ def load_rows(db_path: Path) -> list[dict[str, object]]:
         connection.row_factory = sqlite3.Row
         rows = []
         for row in connection.execute(query):
-            classification = normalize_classification(row["classification"])
-            if classification is None or not row_is_complete(row):
+            label_source = row["collection_label"]
+            if row["mode"] != "data_collection" or label_source is None:
+                label_source = row["classification"]
+
+            normalized_label = normalize_label(label_source)
+            if normalized_label is None or not row_is_complete(row):
                 continue
 
-            label, label_index = classification
+            label, label_index = normalized_label
             output_row = {column: row[column] for column in FEATURE_COLUMNS}
             output_row["label"] = label
             output_row["label_index"] = label_index
@@ -150,9 +172,9 @@ def main() -> None:
     rows = load_rows(args.db)
     if not rows:
         raise SystemExit(
-            "No usable labeled rows found. Set readings.classification to an "
-            "integer class: 0=normal, 1=cooking_oil, 2=car_exhaust, "
-            "3=smoke_smell."
+            "No usable labeled rows found. Collect rows with "
+            "mode=data_collection and collection_label in: normal_air, "
+            "cooking_fume, vehicle_exhaust, cigarette_smoke."
         )
 
     train_rows, test_rows = stratified_split(rows, args.test_size, args.seed)

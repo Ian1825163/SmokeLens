@@ -6,10 +6,10 @@ classification.
 Classes:
 
 ```text
-0 = normal
-1 = cooking_oil
-2 = car_exhaust
-3 = smoke_smell
+0 = normal_air
+1 = cooking_fume
+2 = vehicle_exhaust
+3 = cigarette_smoke
 ```
 
 Input features:
@@ -55,7 +55,8 @@ python3 ml/scripts/prepare_dataset.py --db data/smokelens.sqlite --out-dir ml/da
 
 Rows are usable only when:
 
-- `classification` is one of `0`, `1`, `2`, `3`
+- `mode` is `data_collection`
+- `collection_label` is one of `normal_air`, `cooking_fume`, `vehicle_exhaust`, `cigarette_smoke`
 - `pms_valid` is true
 - all 7 input features are present
 

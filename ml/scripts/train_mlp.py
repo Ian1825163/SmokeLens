@@ -21,7 +21,7 @@ FEATURE_COLUMNS = [
     "humidity",
 ]
 
-LABELS = ["normal", "cooking_oil", "car_exhaust", "smoke_smell"]
+LABELS = ["normal_air", "cooking_fume", "vehicle_exhaust", "cigarette_smoke"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,6 +101,12 @@ def main() -> None:
 
     x_train, y_train = load_dataset(args.train)
     x_test, y_test = load_dataset(args.test)
+    if len(set(y_train)) < 2:
+        raise SystemExit(
+            "Training data must contain at least 2 classes. Collect more "
+            "data_collection rows with different collection_label values "
+            "before training."
+        )
 
     model = Pipeline(
         steps=[

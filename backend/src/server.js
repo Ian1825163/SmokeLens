@@ -1,4 +1,5 @@
 const http = require("http");
+const path = require("path");
 const express = require("express");
 const mqtt = require("mqtt");
 const { WebSocketServer, WebSocket } = require("ws");
@@ -34,11 +35,7 @@ function buildReading(topic, payloadBuffer) {
     received_at: Date.now()
   };
 
-  if (
-    reading.classification === null ||
-    reading.classification === undefined ||
-    reading.classification === ""
-  ) {
+  if (!reading.classification) {
     reading.classification = classifyReading(reading);
   }
 
@@ -55,10 +52,17 @@ function broadcast(wss, event) {
 }
 
 function registerRoutes(app, wss, store) {
-  app.get("/", (req, res) => {
+  app.get("/admin", (req, res) => {
+    res.sendFile(path.join(__dirname, "..", "public", "admin.html"));
+  });
+
+  app.get("/api", (req, res) => {
     res.json({
       service: "SmokeLens backend",
       endpoints: [
+        "/",
+        "/admin",
+        "/api/config",
         "/api/health",
         "/api/latest",
         "/api/history?node_id=node_01&limit=100",
@@ -66,6 +70,14 @@ function registerRoutes(app, wss, store) {
         "/api/export.csv"
       ],
       websocket: "/"
+    });
+  });
+
+  app.get("/api/config", (req, res) => {
+    res.json({
+      node_locations: config.nodeLocations,
+      node_timeout_ms: config.nodeTimeoutMs,
+      mqtt_topic: config.mqttTopic
     });
   });
 
@@ -134,6 +146,7 @@ async function main() {
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     next();
   });
+  app.use(express.static(path.join(__dirname, "..", "public")));
 
   registerRoutes(app, wss, store);
 
@@ -180,7 +193,7 @@ async function main() {
 
     const saved = store.saveReading(reading);
     console.log(
-      `[data] ${saved.node_id} ts=${saved.timestamp} voc=${saved.voc_raw} co=${saved.co_raw} pm25=${saved.pm2_5} pms=${saved.pms_valid}`
+      `[data] ${saved.node_id} mode=${saved.mode} label=${saved.collection_label || "-"} infer=${saved.inference_class || "-"} ts=${saved.timestamp} voc=${saved.voc_raw} co=${saved.co_raw} pm25=${saved.pm2_5} pms=${saved.pms_valid}`
     );
 
     broadcast(wss, {

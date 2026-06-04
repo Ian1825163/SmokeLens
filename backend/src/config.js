@@ -18,6 +18,29 @@ function resolveOptionalPath(value, fallback) {
   return path.isAbsolute(value) ? value : path.resolve(__dirname, "..", value);
 }
 
+function parseJsonEnv(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    console.warn(`[config] ignored invalid ${name}: ${error.message}`);
+    return fallback;
+  }
+}
+
+const defaultNodeLocations = {
+  node_01: {
+    name: "Node 01",
+    lat: 25.0173,
+    lng: 121.5398,
+    radius_m: 80
+  }
+};
+
 module.exports = {
   repoRoot,
   dataDir: defaultDataDir,
@@ -28,6 +51,7 @@ module.exports = {
   httpPort: numberFromEnv("HTTP_PORT", 3000),
   mqttUrl: process.env.MQTT_URL || "mqtt://localhost:1883",
   mqttTopic: process.env.MQTT_TOPIC || "smokelens/+/data",
+  nodeLocations: parseJsonEnv("NODE_LOCATIONS_JSON", defaultNodeLocations),
   nodeTimeoutMs: numberFromEnv("NODE_TIMEOUT_MS", 30000),
   historyLimitDefault: numberFromEnv("HISTORY_LIMIT_DEFAULT", 500),
   historyLimitMax: numberFromEnv("HISTORY_LIMIT_MAX", 5000),
