@@ -8,7 +8,7 @@ SmokeLens 是一個分散式煙霧偵測專題。這個 repo 目前包含單一 
 ESP32 sensor node -> Mosquitto MQTT broker -> Node.js backend -> SQLite -> CSV / API
 ```
 
-ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 5 秒輸出一筆 JSON。筆電端 backend 訂閱 MQTT 訊息，將資料存進 SQLite，之後可匯出 CSV 做 baseline、規則式判斷與 SVM-RBF 訓練。
+ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 JSON。筆電端 backend 訂閱 MQTT 訊息，將資料存進 SQLite，之後可匯出 CSV 做 baseline、規則式判斷與 SVM-RBF 訓練。
 
 ## Quick Links
 

@@ -7,7 +7,7 @@
 | 目的 | 要開的檔案 / 要跑的服務 | 你應該看到 |
 | --- | --- | --- |
 | 只測 4 個開關與 LED | `tools/GpioButtonTest/GpioButtonTest.ino` | Serial 印出 0/1，GPIO32 接地時 LED 亮 |
-| 測完整 ESP32 感測器但不收進 DB | `SmokeLens.ino` + Arduino Serial Monitor | 每 5 秒印一行 JSON |
+| 測完整 ESP32 感測器但不收進 DB | `SmokeLens.ino` + Arduino Serial Monitor | 每 1 秒印一行 JSON |
 | 用 USB Serial 收 CSV | `tools/SerialCsvLogger.ps1` | `data\serial\...csv` 自動分段產生 |
 | 穩定收資料進 SQLite | Mosquitto + backend + `SmokeLens.ino` | backend log 出現 `[data] ...`，DB 有資料 |
 | 匯出資料做分析 | backend export API 或 `npm.cmd run export:csv` | 產生 CSV |
@@ -112,7 +112,7 @@ Arduino IDE:
 #define SMOKELENS_MQTT_SERVER "YOUR_LAPTOP_WIFI_IP"
 ```
 
-這樣 ESP32 仍會每 5 秒在 Serial Monitor 印 JSON，只是不會送到 backend。
+這樣 ESP32 仍會每 1 秒在 Serial Monitor 印 JSON，只是不會送到 backend。
 
 典型輸出：
 
@@ -368,7 +368,7 @@ http://localhost:3000/admin
 4. backend 有 `[data] ...`
 5. `/api/latest` 看得到最新資料
 
-每 5 秒一筆資料，所以：
+每 1 秒一筆資料，所以：
 
 ```text
 10 分鐘約 120 筆

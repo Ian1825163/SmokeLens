@@ -86,7 +86,7 @@ const uint8_t CIGARETTE_LED_PIN = 27;
 // =========================
 const uint32_t SERIAL_BAUD = 115200;
 const uint32_t PMS_BAUD = 9600;
-const uint32_t SAMPLE_INTERVAL_MS = 5000UL;
+const uint32_t SAMPLE_INTERVAL_MS = 1000UL;
 const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000UL;
 const uint32_t WIFI_STATUS_PRINT_INTERVAL_MS = 5000UL;
 const uint32_t MQTT_RETRY_INTERVAL_MS = 5000UL;
