@@ -1,5 +1,6 @@
 const state = {
   config: null,
+  baseline: null,
   map: null,
   fitKey: "",
   markers: new Map(),
@@ -10,6 +11,7 @@ const state = {
 
 const MAP_RADIUS_SCALE = 0.25;
 const MIN_VISIBLE_RADIUS_M = 12;
+const TREND_EMA_ALPHA = 0.18;
 
 function displayRadiusMeters(location) {
   return Math.max(MIN_VISIBLE_RADIUS_M, location.radius_m * MAP_RADIUS_SCALE);
@@ -52,10 +54,18 @@ function updateSummary(statusRows) {
     <span>${SmokeLens.escapeHtml(status.node_id)} &middot; ${SmokeLens.ageText(latest.received_at)} ago &middot; PM2.5 ${SmokeLens.formatNumber(latest.pm2_5, 0)} ug/m3</span>
   `;
 
-  document.getElementById("pm25Value").textContent = SmokeLens.formatNumber(latest.pm2_5, 0);
-  document.getElementById("humidityValue").textContent = SmokeLens.formatNumber(latest.humidity, 1);
-  document.getElementById("vocValue").textContent = SmokeLens.formatNumber(latest.voc_raw, 0);
-  document.getElementById("coValue").textContent = SmokeLens.formatNumber(latest.co_raw, 0);
+  document.getElementById("pmValue").textContent =
+    `${SmokeLens.formatNumber(latest.pm1_0, 0)} / ${SmokeLens.formatNumber(latest.pm2_5, 0)} / ${SmokeLens.formatNumber(latest.pm10, 0)}`;
+  document.getElementById("climateValue").textContent =
+    `${SmokeLens.formatNumber(latest.temperature, 1)} / ${SmokeLens.formatNumber(latest.humidity, 1)}`;
+  document.getElementById("vocValue").textContent = SmokeLens.formatNumber(
+    latest.voc_raw,
+    0
+  );
+  document.getElementById("coValue").textContent = SmokeLens.formatNumber(
+    latest.co_raw,
+    0
+  );
 }
 
 function markerPopup(status, location, readingStatus) {
@@ -63,7 +73,8 @@ function markerPopup(status, location, readingStatus) {
   return `
     <strong>${SmokeLens.escapeHtml(location.name)}</strong><br>
     <span>${SmokeLens.escapeHtml(readingStatus.label)}</span><br>
-    <span>PM2.5 ${SmokeLens.formatNumber(latest.pm2_5, 0)} ug/m3</span><br>
+    <span>PM ${SmokeLens.formatNumber(latest.pm1_0, 0)} / ${SmokeLens.formatNumber(latest.pm2_5, 0)} / ${SmokeLens.formatNumber(latest.pm10, 0)} ug/m3</span><br>
+    <span>Temp ${SmokeLens.formatNumber(latest.temperature, 1)} C &middot; RH ${SmokeLens.formatNumber(latest.humidity, 1)}%</span><br>
     <span>VOC ${SmokeLens.formatNumber(latest.voc_raw, 0)} &middot; CO ${SmokeLens.formatNumber(latest.co_raw, 0)}</span>
   `;
 }
@@ -211,6 +222,40 @@ function setupCanvas(canvas) {
   };
 }
 
+function baselineMetric(key) {
+  return state.baseline?.metrics?.[key] || null;
+}
+
+function standardizeValue(key, value) {
+  const metric = baselineMetric(key);
+  const numericValue = SmokeLens.number(value);
+  if (numericValue === null || !metric) {
+    return null;
+  }
+
+  const mean = SmokeLens.number(metric.mean);
+  const stddev = SmokeLens.number(metric.stddev);
+  if (mean === null) {
+    return null;
+  }
+  if (stddev === null || stddev <= 0) {
+    return 0;
+  }
+  return (numericValue - mean) / stddev;
+}
+
+function exponentialMovingAverage(values, alpha) {
+  let smoothed = null;
+  return values.map((value) => {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+
+    smoothed = smoothed === null ? value : alpha * value + (1 - alpha) * smoothed;
+    return smoothed;
+  });
+}
+
 function drawTrend() {
   const canvas = document.getElementById("userTrendCanvas");
   if (!canvas) {
@@ -242,35 +287,69 @@ function drawTrend() {
     return;
   }
 
+  if (!state.baseline || !state.baseline.row_count) {
+    context.fillStyle = "#64706b";
+    context.font = "13px system-ui";
+    context.fillText("Waiting for normal_air baseline", padding, height / 2);
+    return;
+  }
+
   const series = [
     { key: "pm2_5", color: "#2f6ea9", label: "PM2.5" },
     { key: "voc_raw", color: "#1f9d67", label: "VOC" },
     { key: "co_raw", color: "#d5662f", label: "CO" }
   ];
 
-  series.forEach((item, index) => {
-    const values = rows.map((row) => Number(row[item.key]) || 0);
-    const max = Math.max(...values, 1);
+  const zSeries = series.map((item) => ({
+    ...item,
+    values: exponentialMovingAverage(
+      rows.map((row) => standardizeValue(item.key, row[item.key])),
+      TREND_EMA_ALPHA
+    )
+  }));
+  const finiteValues = zSeries.flatMap((item) =>
+    item.values.filter((value) => Number.isFinite(value))
+  );
+  const maxAbs = Math.max(
+    1,
+    ...finiteValues.map((value) => Math.abs(value))
+  );
+  const zeroY = padding + (height - padding * 2) / 2;
+
+  context.strokeStyle = "#9aa7a0";
+  context.lineWidth = 1.5;
+  context.beginPath();
+  context.moveTo(padding, zeroY);
+  context.lineTo(width - padding, zeroY);
+  context.stroke();
+
+  zSeries.forEach((item, index) => {
     context.strokeStyle = item.color;
     context.lineWidth = 2;
     context.beginPath();
+    let hasPoint = false;
 
-    values.forEach((value, valueIndex) => {
+    item.values.forEach((value, valueIndex) => {
+      if (!Number.isFinite(value)) {
+        return;
+      }
       const x =
         padding +
-        ((width - padding * 2) * valueIndex) / Math.max(values.length - 1, 1);
+        ((width - padding * 2) * valueIndex) / Math.max(item.values.length - 1, 1);
       const y =
-        height -
-        padding -
-        ((height - padding * 2) * value) / max;
-      if (valueIndex === 0) {
+        zeroY -
+        ((height - padding * 2) * value) / (maxAbs * 2);
+      if (!hasPoint) {
         context.moveTo(x, y);
+        hasPoint = true;
       } else {
         context.lineTo(x, y);
       }
     });
 
-    context.stroke();
+    if (hasPoint) {
+      context.stroke();
+    }
     context.fillStyle = item.color;
     context.font = "12px system-ui";
     context.fillText(item.label, padding + index * 62, 16);
@@ -278,13 +357,17 @@ function drawTrend() {
 }
 
 async function refresh() {
-  const [statusPayload, historyPayload] = await Promise.all([
+  const [statusPayload, historyPayload, baselinePayload] = await Promise.all([
     SmokeLens.apiGet("/api/status"),
-    SmokeLens.apiGet("/api/history?limit=80")
+    SmokeLens.apiGet("/api/history?limit=80"),
+    SmokeLens.apiGet("/api/baseline?collection_label=normal_air").catch(
+      () => ({ data: null })
+    )
   ]);
   const statusRows = statusPayload.data || [];
   state.latest = SmokeLens.latestMapFromStatus(statusRows);
   state.history = (historyPayload.data || []).slice().reverse();
+  state.baseline = baselinePayload.data || null;
   updateSummary(statusRows);
   updateMap(statusRows);
   updateNodeList(statusRows);

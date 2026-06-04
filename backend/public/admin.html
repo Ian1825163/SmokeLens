@@ -30,12 +30,17 @@
           <small id="labelValue">-</small>
         </div>
         <div class="metric">
-          <label>PM2.5</label>
-          <strong id="adminPm25">-</strong>
+          <label>PM 1.0 / 2.5 / 10</label>
+          <strong id="adminPm">-</strong>
           <small>ug/m3</small>
         </div>
         <div class="metric">
-          <label>VOC / CO</label>
+          <label>Temp / Humidity</label>
+          <strong id="adminClimate">-</strong>
+          <small>C / %RH</small>
+        </div>
+        <div class="metric">
+          <label>VOC / CO raw</label>
           <strong id="adminGas">-</strong>
           <small>raw ADC</small>
         </div>
@@ -59,17 +64,15 @@
                   <th>Status</th>
                   <th>Mode</th>
                   <th>Label</th>
-                  <th>VOC</th>
-                  <th>CO</th>
-                  <th>PM2.5</th>
-                  <th>Temp</th>
-                  <th>Humidity</th>
+                  <th>VOC / CO</th>
+                  <th>PM1 / 2.5 / 10</th>
+                  <th>Temp / Humidity</th>
                   <th>Age</th>
                 </tr>
               </thead>
               <tbody id="nodeTable">
                 <tr>
-                  <td colspan="10" class="empty">Waiting for readings</td>
+                  <td colspan="8" class="empty">Waiting for readings</td>
                 </tr>
               </tbody>
             </table>
@@ -79,9 +82,9 @@
           <div class="panel">
             <div class="panel-header">
               <h2>Trend</h2>
-              <span class="subtle">PM2.5 / VOC / CO</span>
+              <span class="subtle">PM2.5 / VOC / CO z-score, EMA smoothing</span>
             </div>
-            <canvas id="trendCanvas" class="trend" width="720" height="300"></canvas>
+            <canvas id="trendCanvas" class="trend trend-fixed" width="720" height="300"></canvas>
           </div>
           <div class="panel">
             <div class="panel-header">

@@ -370,12 +370,28 @@ Do these after the full pipeline is confirmed:
    - latest values
    - node online/offline
    - simple trend chart
-10. Later collect labeled scenarios:
+10. Expand dashboard metrics from the current 4 fields to all 7 sensor values:
+   - VOC raw
+   - CO raw
+   - VOC mV
+   - CO mV
+   - PM2.5
+   - temperature
+   - humidity
+11. Add `ml/scripts/class_counts.py` to print row counts for the 4 training classes:
+   - `normal_air`
+   - `cooking_fume`
+   - `vehicle_exhaust`
+   - `cigarette_smoke`
+12. Add a `prepare_dataset.py` option to rebalance classes down to the smallest class size.
+   - Use the smallest class row count as the target count for every class.
+   - For larger classes such as `normal_air`, downsample by evenly spaced interval selection.
+13. Later collect labeled scenarios:
    - normal air
    - cigarette smoke or incense substitute
    - cooking fume
    - vehicle exhaust
-11. Then train SVM-RBF from exported CSV.
+14. Then train SVM-RBF from exported CSV.
 
 ## 10. Commit/Push Notes
 

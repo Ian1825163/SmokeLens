@@ -147,6 +147,7 @@ const SmokeLens = (() => {
     formatNumber,
     formatTime,
     latestMapFromStatus,
+    number,
     nodeLocation,
     statusFromReading
   };

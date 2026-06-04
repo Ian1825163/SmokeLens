@@ -311,7 +311,7 @@ a {
 .admin-metrics {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
 .admin-grid {
@@ -348,7 +348,7 @@ a {
 table {
   border-collapse: collapse;
   font-size: 13px;
-  min-width: 900px;
+  min-width: 820px;
   width: 100%;
 }
 
@@ -368,16 +368,19 @@ th {
 }
 
 .trend {
-  height: 250px;
+  display: block;
   width: 100%;
+}
+
+.trend-fixed {
+  aspect-ratio: 16 / 9;
+  height: auto;
 }
 
 .trend-compact {
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 8px;
-  display: block;
-  height: 190px;
 }
 
 .feed {
