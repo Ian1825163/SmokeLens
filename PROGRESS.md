@@ -55,6 +55,7 @@ Button/mode feature work completed and merged:
 - Added web dashboards:
   - `/` for user-facing smoke area status on a Leaflet/OpenStreetMap view.
   - `/admin` for developer telemetry, node status, trend, and live feed.
+- Tried adding a "flash once per recorded sample" LED indicator, but the available LEDs on the current ESP32 board behaved inconsistently and stuck on/off after several samples, so that feature is disabled for now and should be revisited with a dedicated spare GPIO or external LED.
 
 Important local-only files:
 
