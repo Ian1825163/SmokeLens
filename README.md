@@ -169,18 +169,24 @@ arduino_secrets.example.h -> arduino_secrets.h
 ```
 
 Multi-WiFi MQTT mapping is supported. Each WiFi row can include a third value
-for the Mosquitto broker IP used on that network:
+for the Mosquitto broker IP used on that network. Use `SMOKELENS_WIFI_PERSONAL`
+for normal WPA/WPA2 networks and `SMOKELENS_WIFI_PEAP` for `ntu_peap`:
 
 ```cpp
-#define SMOKELENS_WIFI_CREDENTIALS                                \
-  {                                                               \
-    {"LabWiFi", "lab_password", "192.168.1.140"},                 \
-    {"PhoneHotspot", "phone_hotspot_password", "172.20.10.3"}    \
+#define SMOKELENS_WIFI_CREDENTIALS                                         \
+  {                                                                        \
+    SMOKELENS_WIFI_PERSONAL("LabWiFi", "lab_password",                    \
+                            "192.168.1.140"),                             \
+    SMOKELENS_WIFI_PERSONAL("PhoneHotspot", "phone_hotspot_password",      \
+                            "172.20.10.3"),                               \
+    SMOKELENS_WIFI_PEAP("ntu_peap", "YOUR_NTU_ACCOUNT",                   \
+                        "YOUR_NTU_ACCOUNT", "YOUR_NTU_PASSWORD",          \
+                        "YOUR_LAPTOP_WIFI_IP_ON_NTU_PEAP")                \
   }
 ```
 
 Rows with only SSID/password still work and fall back to
-`SMOKELENS_MQTT_SERVER`.
+`SMOKELENS_MQTT_SERVER`, but the helper macros are easier to read.
 
 然後填入 WiFi SSID、password、筆電 MQTT broker IP 和 node ID。韌體支援多組 WiFi，會依序嘗試 `SMOKELENS_WIFI_CREDENTIALS` 裡的 SSID；舊的單組 `SMOKELENS_WIFI_SSID` / `SMOKELENS_WIFI_PASSWORD` 寫法也仍可用。
 

@@ -16,6 +16,24 @@
 #include <HardwareSerial.h>
 #include <time.h>
 
+#if __has_include(<esp_eap_client.h>)
+#include <esp_eap_client.h>
+#define SMOKELENS_HAS_ENTERPRISE_WIFI 1
+#define SMOKELENS_USE_EAP_CLIENT 1
+#elif __has_include(<esp_wpa2.h>)
+#include <esp_wpa2.h>
+#define SMOKELENS_HAS_ENTERPRISE_WIFI 1
+#define SMOKELENS_USE_WPA2_ENT 1
+#else
+#define SMOKELENS_HAS_ENTERPRISE_WIFI 0
+#endif
+
+#define SMOKELENS_WIFI_PERSONAL(ssid, password, mqttServer) \
+  { ssid, password, mqttServer, nullptr, nullptr, false }
+
+#define SMOKELENS_WIFI_PEAP(ssid, identity, username, password, mqttServer) \
+  { ssid, password, mqttServer, identity, username, true }
+
 #if __has_include("arduino_secrets.h")
 #include "arduino_secrets.h"
 #endif
@@ -48,6 +66,9 @@ struct WiFiCredential {
   const char *ssid;
   const char *password;
   const char *mqttServer;
+  const char *enterpriseIdentity;
+  const char *enterpriseUsername;
+  bool enterprise;
 };
 
 const WiFiCredential WIFI_CREDENTIALS[] = SMOKELENS_WIFI_CREDENTIALS;
@@ -236,6 +257,10 @@ bool mqttServerValueLooksValid(const char *server) {
          strcmp(server, "YOUR_LAPTOP_WIFI_IP") != 0;
 }
 
+bool credentialValueLooksValid(const char *value, const char *placeholder) {
+  return value != nullptr && strlen(value) > 0 && strcmp(value, placeholder) != 0;
+}
+
 const char *mqttServerForCredential(const WiFiCredential &credential) {
   if (mqttServerValueLooksValid(credential.mqttServer)) {
     return credential.mqttServer;
@@ -243,17 +268,84 @@ const char *mqttServerForCredential(const WiFiCredential &credential) {
   return DEFAULT_MQTT_SERVER;
 }
 
+const char *enterpriseIdentityForCredential(const WiFiCredential &credential) {
+  if (credential.enterpriseIdentity != nullptr &&
+      strlen(credential.enterpriseIdentity) > 0) {
+    return credential.enterpriseIdentity;
+  }
+  return credential.enterpriseUsername;
+}
+
 bool wifiCredentialLooksValid(const WiFiCredential &credential) {
-  return strlen(credential.ssid) > 0 &&
-         strcmp(credential.ssid, "YOUR_SSID") != 0 &&
-         strcmp(credential.ssid, "YOUR_WIFI_SSID") != 0 &&
-         strcmp(credential.password, "YOUR_PASSWORD") != 0 &&
+  if (!credentialValueLooksValid(credential.ssid, "YOUR_SSID") ||
+      strcmp(credential.ssid, "YOUR_WIFI_SSID") == 0) {
+    return false;
+  }
+
+  if (credential.enterprise) {
+    return SMOKELENS_HAS_ENTERPRISE_WIFI &&
+           credentialValueLooksValid(credential.enterpriseUsername,
+                                     "YOUR_NTU_ACCOUNT") &&
+           credentialValueLooksValid(credential.password,
+                                     "YOUR_NTU_PASSWORD");
+  }
+
+  return credentialValueLooksValid(credential.password, "YOUR_PASSWORD") &&
          strcmp(credential.password, "YOUR_WIFI_PASSWORD") != 0;
 }
 
 bool wifiCredentialConfigLooksValid(const WiFiCredential &credential) {
   return wifiCredentialLooksValid(credential) &&
          mqttServerValueLooksValid(mqttServerForCredential(credential));
+}
+
+const char *wifiCredentialAuthMode(const WiFiCredential &credential) {
+  return credential.enterprise ? "peap" : "personal";
+}
+
+void disableEnterpriseWiFi() {
+#if SMOKELENS_HAS_ENTERPRISE_WIFI
+#if defined(SMOKELENS_USE_EAP_CLIENT)
+  esp_wifi_sta_enterprise_disable();
+#elif defined(SMOKELENS_USE_WPA2_ENT)
+  esp_wifi_sta_wpa2_ent_disable();
+#endif
+#endif
+}
+
+uint8_t *credentialBytes(const char *value) {
+  return reinterpret_cast<uint8_t *>(const_cast<char *>(value));
+}
+
+bool configureEnterpriseWiFi(const WiFiCredential &credential) {
+#if !SMOKELENS_HAS_ENTERPRISE_WIFI
+  (void)credential;
+  Serial.println("# PEAP skipped: this ESP32 Arduino core has no enterprise WiFi API");
+  return false;
+#else
+  const char *identity = enterpriseIdentityForCredential(credential);
+  const char *username = credential.enterpriseUsername;
+  const char *password = credential.password;
+
+  if (identity == nullptr || username == nullptr || password == nullptr) {
+    Serial.println("# PEAP skipped: identity, username, or password is missing");
+    return false;
+  }
+
+#if defined(SMOKELENS_USE_EAP_CLIENT)
+  esp_eap_client_set_identity(credentialBytes(identity), strlen(identity));
+  esp_eap_client_set_username(credentialBytes(username), strlen(username));
+  esp_eap_client_set_password(credentialBytes(password), strlen(password));
+  esp_wifi_sta_enterprise_enable();
+#elif defined(SMOKELENS_USE_WPA2_ENT)
+  esp_wifi_sta_wpa2_ent_set_identity(credentialBytes(identity), strlen(identity));
+  esp_wifi_sta_wpa2_ent_set_username(credentialBytes(username), strlen(username));
+  esp_wifi_sta_wpa2_ent_set_password(credentialBytes(password), strlen(password));
+  esp_wifi_sta_wpa2_ent_enable();
+#endif
+
+  return true;
+#endif
 }
 
 int nextValidWiFiCredentialIndex() {
@@ -471,8 +563,20 @@ void startWiFiAttempt() {
     mqtt.disconnect();
   }
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
-  WiFi.disconnect(false);
-  WiFi.begin(credential.ssid, credential.password);
+  WiFi.disconnect(true);
+  disableEnterpriseWiFi();
+  delay(100);
+
+  if (credential.enterprise) {
+    if (!configureEnterpriseWiFi(credential)) {
+      Serial.println("# WiFi skipped: PEAP configuration failed");
+      return;
+    }
+    WiFi.begin(credential.ssid);
+  } else {
+    WiFi.begin(credential.ssid, credential.password);
+  }
+
   lastWiFiAttemptMs = millis();
   lastWiFiStatusPrintMs = lastWiFiAttemptMs;
   mqttTcpDiagnosticPrinted = false;
@@ -484,7 +588,9 @@ void startWiFiAttempt() {
   Serial.print(currentWiFiCredentialIndex + 1);
   Serial.print("/");
   Serial.print(WIFI_CREDENTIAL_COUNT);
-  Serial.print(") mqtt=");
+  Serial.print(") auth=");
+  Serial.print(wifiCredentialAuthMode(credential));
+  Serial.print(" mqtt=");
   Serial.println(MQTT_SERVER);
 }
 

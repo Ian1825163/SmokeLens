@@ -393,6 +393,10 @@ Do these after the full pipeline is confirmed:
    - cooking fume
    - vehicle exhaust
 14. Then train SVM-RBF from exported CSV.
+15. Include the committed cooking fume CSV logs in the ML dataset workflow:
+   - `log/0601log_cooking1.csv`
+   - `log/0602log_cooking2.csv`
+   - `log/0603log_cooking3.csv`
 
 ## 10. Commit/Push Notes
 

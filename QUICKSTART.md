@@ -172,9 +172,9 @@ ESP32 現在支援多組 WiFi。開機後會照順序嘗試，連不上就換下
 
 #define SMOKELENS_WIFI_CREDENTIALS              \
   {                                             \
-    {"LabWiFi", "lab_password"},                \
-    {"PhoneHotspot", "phone_hotspot_password"}, \
-    {"HomeWiFi", "home_password"}               \
+    SMOKELENS_WIFI_PERSONAL("LabWiFi", "lab_password", "192.168.1.140"), \
+    SMOKELENS_WIFI_PERSONAL("PhoneHotspot", "phone_hotspot_password", "172.20.10.3"), \
+    SMOKELENS_WIFI_PEAP("ntu_peap", "YOUR_NTU_ACCOUNT", "YOUR_NTU_ACCOUNT", "YOUR_NTU_PASSWORD", "YOUR_LAPTOP_WIFI_IP_ON_NTU_PEAP") \
   }
 
 #define SMOKELENS_MQTT_SERVER "192.168.1.140"
@@ -195,7 +195,9 @@ Serial Monitor 會印出目前嘗試哪個 SSID：
 # WiFi connected ssid=PhoneHotspot ip=192.168.43.22
 ```
 
-注意：多組 WiFi 只解決「ESP32 要連哪個 WiFi」。如果 MQTT broker 跑在筆電上，`SMOKELENS_MQTT_SERVER` 還是要填當下筆電在那個 WiFi 裡的 IP。
+`SMOKELENS_WIFI_PERSONAL` 用於一般 WiFi。`SMOKELENS_WIFI_PEAP` 用於 `ntu_peap` 這類 WPA2-Enterprise/PEAP WiFi，參數依序是 SSID、identity、username、password、該 WiFi 下的筆電 MQTT broker IP。
+
+注意：多組 WiFi 只解決「ESP32 要連哪個 WiFi」。如果 MQTT broker 跑在筆電上，每一列最後的 MQTT IP 要填當下筆電在那個 WiFi 裡的 IP。
 
 ## 5. 查筆電 IP
 
