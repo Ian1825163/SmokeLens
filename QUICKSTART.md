@@ -385,6 +385,54 @@ PowerShell 可能會擋 `npm.ps1`，所以 Windows PowerShell 建議固定用 `n
 [mqtt] subscribed smokelens/+/data
 ```
 
+### 關閉或重啟 Node.js backend
+
+如果改了 backend 程式、`.env`、dashboard 設定，或遇到 `EADDRINUSE: address already in use 0.0.0.0:3000`，需要先停掉舊的 backend 再重開。
+
+如果 backend 是在目前這個 Terminal 前景執行：
+
+```text
+Ctrl+C
+```
+
+然後重新啟動：
+
+Windows PowerShell:
+
+```powershell
+cd backend
+npm.cmd start
+```
+
+macOS / Linux:
+
+```bash
+cd backend
+npm start
+```
+
+如果找不到是哪個 Terminal 在跑，可以先查 port `3000`。
+
+Windows PowerShell:
+
+```powershell
+netstat -ano | Select-String ":3000"
+Stop-Process -Id <PID>
+```
+
+macOS / Linux:
+
+```bash
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+kill <PID>
+```
+
+其中 `<PID>` 是佔用 `3000` 的 process id。重啟後再重新整理 dashboard：
+
+```text
+http://localhost:3000/
+```
+
 ### Terminal 3: ESP32
 
 1. 確認 `arduino_secrets.h` 的 WiFi 與 MQTT IP 正確
