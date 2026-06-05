@@ -58,6 +58,13 @@ backend 使用：
 - `sql.js`：寫入 `data/smokelens.sqlite`
 - `Leaflet + OpenStreetMap`：顯示固定節點位置與偵測區域
 
+如果 ESP32 只接牆壁插座供電，仍可在電腦端用 MQTT live monitor 看即時資料：
+
+```bash
+cd backend
+npm run mqtt:tail
+```
+
 常用 API：
 
 ```text

@@ -314,6 +314,8 @@ inference mode                     -> *_inference_inference.csv
 
 需要三個視窗：Mosquitto、backend、Arduino Serial Monitor。
 
+如果 ESP32 只接牆壁電源、沒有接 USB 到電腦，可以改用 `Terminal 4: MQTT live monitor` 看即時回傳。
+
 ### Terminal 1: Mosquitto broker
 
 在 repo 根目錄：
@@ -406,6 +408,46 @@ Dashboard:
 ```text
 http://localhost:3000/
 http://localhost:3000/admin
+```
+
+### Terminal 4: MQTT live monitor
+
+ESP32 不需要接 USB，只要接牆壁電源並成功連上同一個 MQTT broker，就可以在電腦終端看到它 publish 的資料。
+
+Windows PowerShell:
+
+```powershell
+cd backend
+npm.cmd run mqtt:tail
+```
+
+macOS / Linux:
+
+```bash
+cd backend
+npm run mqtt:tail
+```
+
+預期輸出：
+
+```text
+[mqtt-tail] connected mqtt://localhost:1883
+[mqtt-tail] subscribed smokelens/+/data
+[01:23:45] node_01 mode=inference label=normal_air pm=0/1/1 temp=26.9C rh=60.0% voc=2441 co=3256 pms=true
+```
+
+如果想看完整原始 JSON：
+
+Windows PowerShell:
+
+```powershell
+npm.cmd run mqtt:tail -- --raw
+```
+
+macOS / Linux:
+
+```bash
+npm run mqtt:tail -- --raw
 ```
 
 節點地圖位置在 `backend/.env` 設定：
