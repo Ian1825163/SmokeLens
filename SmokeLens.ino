@@ -96,14 +96,7 @@ const uint8_t ADC_SAMPLE_COUNT = 10;
 const uint16_t PMS_FRAME_SIZE = 32;
 const uint16_t PMS_PAYLOAD_LENGTH = 28;
 
-const char *INFERENCE_MODEL_VERSION = "rule_fallback_v0";
-
-// Conservative normal-air baseline thresholds from local SQLite data.
-// These only reduce obvious false positives until trained parameters are exported.
-const uint16_t MODEL_VOC_RAW_THRESHOLD = 2820;
-const uint16_t MODEL_CO_RAW_THRESHOLD = 3925;
-const float MODEL_PM25_THRESHOLD = 25.0f;
-const float MODEL_CIGARETTE_SCORE_THRESHOLD = 0.65f;
+const char *INFERENCE_MODEL_VERSION = "backend_pending";
 
 HardwareSerial pmsSerial(2);
 WiFiClient wifiClient;
@@ -145,12 +138,6 @@ struct ButtonSnapshot {
   bool cookingFume;
   bool vehicleExhaust;
   bool cigaretteSmoke;
-};
-
-struct InferenceResult {
-  bool cigaretteDetected;
-  float score;
-  const char *classification;
 };
 
 const char *modeToString(NodeMode mode) {
@@ -201,33 +188,6 @@ ButtonSnapshot readButtons() {
   buttons.vehicleExhaust = digitalRead(EXHAUST_BUTTON_PIN) == LOW;
   buttons.cigaretteSmoke = digitalRead(CIGARETTE_BUTTON_PIN) == LOW;
   return buttons;
-}
-
-float normalizedExcess(float value, float threshold) {
-  if (threshold <= 0.0f || value <= threshold) {
-    return 0.0f;
-  }
-  const float excess = (value - threshold) / threshold;
-  return constrain(excess, 0.0f, 1.0f);
-}
-
-InferenceResult runCigaretteInference(uint16_t vocRaw, uint16_t coRaw,
-                                      const PMS5003TData &pms) {
-  const float pm25 = pms.valid ? static_cast<float>(pms.pm2_5) : 0.0f;
-  const float vocScore = normalizedExcess(vocRaw, MODEL_VOC_RAW_THRESHOLD);
-  const float coScore = normalizedExcess(coRaw, MODEL_CO_RAW_THRESHOLD);
-  const float pmScore = normalizedExcess(pm25, MODEL_PM25_THRESHOLD);
-  const float score = (0.45f * vocScore) + (0.35f * coScore) + (0.20f * pmScore);
-
-  InferenceResult result;
-  result.score = score;
-  result.cigaretteDetected =
-      score >= MODEL_CIGARETTE_SCORE_THRESHOLD ||
-      (vocRaw >= MODEL_VOC_RAW_THRESHOLD && coRaw >= MODEL_CO_RAW_THRESHOLD &&
-       pm25 >= MODEL_PM25_THRESHOLD);
-  result.classification =
-      result.cigaretteDetected ? "cigarette_smoke" : "normal_air";
-  return result;
 }
 
 bool mqttServerValueLooksValid(const char *server) {
@@ -655,10 +615,7 @@ void sampleAndPublish() {
   uint16_t coMilliVolt = readMilliVoltAverage(MQ7_PIN);
   PMS5003TData pms = readPMS5003T();
 
-  InferenceResult inference = runCigaretteInference(vocRaw, coRaw, pms);
-  const bool ledOn =
-      mode == NodeMode::Inference && inference.cigaretteDetected;
-  digitalWrite(CIGARETTE_LED_PIN, ledOn ? HIGH : LOW);
+  digitalWrite(CIGARETTE_LED_PIN, LOW);
 
   StaticJsonDocument<768> doc;
   JsonObject root = doc.to<JsonObject>();
@@ -668,15 +625,9 @@ void sampleAndPublish() {
   root["collection_label"] =
       mode == NodeMode::DataCollection ? labelToString(collectionLabel) : nullptr;
   root["model_version"] = INFERENCE_MODEL_VERSION;
-  root["inference_class"] =
-      mode == NodeMode::Inference ? inference.classification : nullptr;
-  root["cigarette_detected"] =
-      mode == NodeMode::Inference ? inference.cigaretteDetected : false;
-  if (mode == NodeMode::Inference) {
-    root["inference_score"] = inference.score;
-  } else {
-    root["inference_score"] = nullptr;
-  }
+  root["inference_class"] = nullptr;
+  root["cigarette_detected"] = false;
+  root["inference_score"] = nullptr;
   root["voc_raw"] = vocRaw;
   root["co_raw"] = coRaw;
   root["voc_mv"] = vocMilliVolt;
@@ -688,7 +639,7 @@ void sampleAndPublish() {
   buttonJson["cooking_fume"] = buttons.cookingFume;
   buttonJson["vehicle_exhaust"] = buttons.vehicleExhaust;
   buttonJson["cigarette_smoke"] = buttons.cigaretteSmoke;
-  buttonJson["led_cigarette"] = ledOn;
+  buttonJson["led_cigarette"] = false;
 
   char payload[768];
   size_t payloadLength = serializeJson(root, payload, sizeof(payload));

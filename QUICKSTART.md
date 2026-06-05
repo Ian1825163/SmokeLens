@@ -109,7 +109,7 @@ http://localhost:3000/admin
 | Button 3 | GPIO33 | label = `cooking_fume` | normal |
 | Button 5 | GPIO25 | label = `vehicle_exhaust` | normal |
 | Button 8 | GPIO26 | label = `cigarette_smoke` | normal |
-| LED 1 | GPIO27 | inference 模式偵測到香菸時亮 | 其他情況滅 |
+| LED 1 | GPIO27 | 保留給未來本機警示 | 目前完整韌體不使用 |
 
 資料收集模式建議一次只開一個 label switch。若多個 label 同時接地，目前優先順序是：
 
@@ -156,10 +156,10 @@ Arduino IDE:
 典型輸出：
 
 ```json
-{"node_id":"node_01","timestamp":1716000000,"mode":"inference","collection_label":null,"model_version":"rule_fallback_v0","inference_class":"normal_air","cigarette_detected":false,"inference_score":0,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
+{"node_id":"node_01","timestamp":1716000000,"mode":"inference","collection_label":null,"model_version":"backend_pending","inference_class":null,"cigarette_detected":false,"inference_score":null,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
 ```
 
-目前 `rule_fallback_v0` 是暫時的規則式推論，不是最後訓練好的 SVM model。
+ESP32 只送 raw sensor values；目前 `backend_rule_v0` 是 backend 端的暫時規則式推論，不是最後訓練好的 SVM model。
 
 ## 4. 設定多組 WiFi
 
