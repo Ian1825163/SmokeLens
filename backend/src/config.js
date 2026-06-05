@@ -35,8 +35,8 @@ function parseJsonEnv(name, fallback) {
 const defaultNodeLocations = {
   node_01: {
     name: "Node 01",
-    lat: 25.0173,
-    lng: 121.5398,
+    lat: 25.02171637333861,
+    lng: 121.53665177465513,
     radius_m: 80
   }
 };

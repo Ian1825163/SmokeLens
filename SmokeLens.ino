@@ -98,9 +98,10 @@ const uint16_t PMS_PAYLOAD_LENGTH = 28;
 
 const char *INFERENCE_MODEL_VERSION = "rule_fallback_v0";
 
-// Placeholder thresholds until trained model parameters are exported to firmware.
-const uint16_t MODEL_VOC_RAW_THRESHOLD = 900;
-const uint16_t MODEL_CO_RAW_THRESHOLD = 800;
+// Conservative normal-air baseline thresholds from local SQLite data.
+// These only reduce obvious false positives until trained parameters are exported.
+const uint16_t MODEL_VOC_RAW_THRESHOLD = 2820;
+const uint16_t MODEL_CO_RAW_THRESHOLD = 3925;
 const float MODEL_PM25_THRESHOLD = 25.0f;
 const float MODEL_CIGARETTE_SCORE_THRESHOLD = 0.65f;
 

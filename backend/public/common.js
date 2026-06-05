@@ -1,5 +1,5 @@
 const SmokeLens = (() => {
-  const DEFAULT_CENTER = { lat: 25.0173, lng: 121.5398 };
+  const DEFAULT_CENTER = { lat: 25.02171637333861, lng: 121.53665177465513 };
   const DEFAULT_RADIUS_M = 80;
 
   async function apiGet(path) {
