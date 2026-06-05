@@ -8,7 +8,7 @@ SmokeLens 是一個分散式煙霧偵測專題。這個 repo 目前包含單一 
 ESP32 sensor node -> Mosquitto MQTT broker -> Node.js backend -> SQLite -> CSV / API
 ```
 
-ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 JSON。筆電端 backend 訂閱 MQTT 訊息，將資料存進 SQLite，之後可匯出 CSV 做 baseline、規則式判斷與 SVM-RBF 訓練。
+ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料存進 SQLite，並負責目前的規則式 inference；之後可匯出 CSV 做 baseline 與 SVM-RBF 訓練。
 
 ## Quick Links
 
@@ -33,7 +33,7 @@ ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 JSON。�
 | Button 3 | 油煙 label | GPIO33 |
 | Button 5 | 汽車廢氣 label | GPIO25 |
 | Button 8 | 香菸 label | GPIO26 |
-| LED 1 | 香菸偵測警示 | GPIO27 |
+| LED 1 | 保留給未來本機警示 | GPIO27 |
 
 按鈕使用 `INPUT_PULLUP`，所以接到 GND 代表 active / 1，放開代表 inactive / 0。
 
@@ -44,9 +44,9 @@ Default 是 inference mode：
 - Button 1 放開：`mode = inference`
 - Button 1 接 GND：`mode = data_collection`
 
-data collection mode 會依 Button 3/5/8 輸出 `collection_label`。inference mode 會輸出 `inference_class`、`cigarette_detected`、`inference_score`，並在偵測到香菸時讓 GPIO27 LED 亮。
+data collection mode 會依 Button 3/5/8 輸出 `collection_label`。inference mode 仍由 ESP32 輸出 raw sensor values，但最終的 `inference_class`、`cigarette_detected`、`inference_score` 由 backend 補上。
 
-目前 firmware 內的 inference 是 `rule_fallback_v0` 暫時規則，不是最終訓練好的 SVM model。資料欄位已先準備好，方便之後替換成正式模型。
+目前 backend 內的 inference 是 `backend_rule_v0` 暫時規則，不是最終訓練好的 SVM model。資料欄位已先準備好，方便之後替換成正式模型。
 
 ## Backend
 

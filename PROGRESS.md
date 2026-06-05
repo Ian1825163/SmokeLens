@@ -46,8 +46,8 @@ Completed today:
 Button/mode feature work completed and merged:
 
 - Added ESP32 button-controlled mode switching.
-- Added firmware JSON fields for data collection labels and inference output.
-- Added LED 1 alert output for cigarette detection in inference mode.
+- Added firmware JSON fields for data collection labels and raw inference-mode sensor output.
+- Moved final smoke inference to the backend so rules/models can change without reflashing ESP32.
 - Added backend database/CSV columns for mode, labels, inference class, score, and model version.
 - Added `QUICKSTART.md` so GPIO tests, data collection, backend startup, and CSV export commands are easier to find.
 - Added multi-WiFi firmware configuration through `SMOKELENS_WIFI_CREDENTIALS`, while keeping the old single-WiFi macros compatible.
@@ -127,7 +127,7 @@ Data:
 | Button 3 | GPIO 33 | Normal air | Oil/cooking fume label |
 | Button 5 | GPIO 25 | Normal air | Vehicle exhaust label |
 | Button 8 | GPIO 26 | Normal air | Cigarette label |
-| LED 1 | GPIO 27 | Cigarette detected in inference mode | Off |
+| LED 1 | GPIO 27 | Reserved for future local alert | Currently unused by full firmware |
 
 If multiple label buttons are HIGH, current priority is:
 
@@ -138,10 +138,10 @@ cigarette_smoke > vehicle_exhaust > cooking_fume > normal_air
 Current inference model:
 
 ```text
-rule_fallback_v0
+backend_rule_v0
 ```
 
-This is a placeholder until trained model parameters are exported to firmware.
+This is a backend placeholder until trained model parameters are available.
 
 ## 2.2 GPIO Button Test Sketch
 
@@ -287,7 +287,7 @@ Expected Serial:
 Expected JSON:
 
 ```json
-{"node_id":"node_01","timestamp":1716000000,"mode":"inference","collection_label":null,"model_version":"rule_fallback_v0","inference_class":"normal_air","cigarette_detected":false,"inference_score":0,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
+{"node_id":"node_01","timestamp":1716000000,"mode":"inference","collection_label":null,"model_version":"backend_pending","inference_class":null,"cigarette_detected":false,"inference_score":null,"voc_raw":600,"co_raw":660,"voc_mv":620,"co_mv":670,"pm1_0":0,"pm2_5":5,"pm10":5,"temperature":21.1,"humidity":70,"pms_valid":true}
 ```
 
 Expected backend log:
@@ -358,14 +358,14 @@ Do these after the full pipeline is confirmed:
 1. Test button GPIO states in Serial JSON.
 2. Confirm Button 1 switches `mode` between `inference` and `data_collection`.
 3. Confirm Button 3/5/8 produce `collection_label` values in data collection mode.
-4. Confirm LED 1 turns on only in inference mode when `cigarette_detected:true`.
+4. Decide whether LED 1 should be reintroduced as a backend-independent local alert after model behavior is stable.
 5. Collect 10-20 minutes of normal-air baseline data.
 6. Export CSV and inspect ranges for:
    - `voc_raw`
    - `co_raw`
    - `pm2_5`
    - temperature/humidity
-7. Replace `rule_fallback_v0` with trained model parameters once available.
+7. Replace `backend_rule_v0` with trained model parameters once available.
 8. Add a simple baseline summary endpoint or script.
 9. Build a minimal dashboard page:
    - latest values
