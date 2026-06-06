@@ -15,6 +15,8 @@
 #include <ArduinoJson.h>
 #include <HardwareSerial.h>
 #include <time.h>
+#include <esp_err.h>
+#include <esp_log.h>
 
 #if __has_include(<esp_eap_client.h>)
 #include <esp_eap_client.h>
@@ -108,10 +110,12 @@ const uint8_t CIGARETTE_LED_PIN = 27;
 const uint32_t SERIAL_BAUD = 115200;
 const uint32_t PMS_BAUD = 9600;
 const uint32_t SAMPLE_INTERVAL_MS = 1000UL;
-const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000UL;
-const uint32_t WIFI_STATUS_PRINT_INTERVAL_MS = 5000UL;
+const uint32_t WIFI_PERSONAL_CONNECT_TIMEOUT_MS = 8000UL;
+const uint32_t WIFI_ENTERPRISE_CONNECT_TIMEOUT_MS = 30000UL;
+const uint32_t WIFI_STATUS_PRINT_INTERVAL_MS = 2000UL;
 const uint32_t MQTT_RETRY_INTERVAL_MS = 5000UL;
 const uint32_t PMS_READ_TIMEOUT_MS = 1500UL;
+const bool WIFI_VERBOSE_EAP_LOGS = true;
 
 const uint8_t ADC_SAMPLE_COUNT = 10;
 const uint16_t PMS_FRAME_SIZE = 32;
@@ -132,6 +136,19 @@ int currentWiFiCredentialIndex = -1;
 bool timeConfigured = false;
 bool wifiWasConnected = false;
 bool mqttTcpDiagnosticPrinted = false;
+uint8_t lastWiFiDisconnectReason = 0;
+uint32_t lastWiFiDisconnectReasonPrintMs = 0;
+bool currentWiFiAttemptAuthFailed = false;
+
+#if defined(SMOKELENS_USE_EAP_CLIENT)
+#define SMOKELENS_WIFI_EVENT_DISCONNECTED ARDUINO_EVENT_WIFI_STA_DISCONNECTED
+#define SMOKELENS_WIFI_EVENT_CONNECTED ARDUINO_EVENT_WIFI_STA_CONNECTED
+#define SMOKELENS_WIFI_EVENT_GOT_IP ARDUINO_EVENT_WIFI_STA_GOT_IP
+#elif defined(SMOKELENS_USE_WPA2_ENT)
+#define SMOKELENS_WIFI_EVENT_DISCONNECTED SYSTEM_EVENT_STA_DISCONNECTED
+#define SMOKELENS_WIFI_EVENT_CONNECTED SYSTEM_EVENT_STA_CONNECTED
+#define SMOKELENS_WIFI_EVENT_GOT_IP SYSTEM_EVENT_STA_GOT_IP
+#endif
 
 struct PMS5003TData {
   bool valid;
@@ -160,6 +177,8 @@ struct ButtonSnapshot {
   bool vehicleExhaust;
   bool cigaretteSmoke;
 };
+
+const char *wifiStatusToString(wl_status_t status);
 
 const char *modeToString(NodeMode mode) {
   return mode == NodeMode::DataCollection ? "data_collection" : "inference";
@@ -229,8 +248,7 @@ const char *mqttServerForCredential(const WiFiCredential &credential) {
 }
 
 const char *enterpriseIdentityForCredential(const WiFiCredential &credential) {
-  if (credential.enterpriseIdentity != nullptr &&
-      strlen(credential.enterpriseIdentity) > 0) {
+  if (credential.enterpriseIdentity != nullptr) {
     return credential.enterpriseIdentity;
   }
   return credential.enterpriseUsername;
@@ -259,22 +277,78 @@ bool wifiCredentialConfigLooksValid(const WiFiCredential &credential) {
          mqttServerValueLooksValid(mqttServerForCredential(credential));
 }
 
+bool wifiSsidEquals(const WiFiCredential &credential, const char *ssid) {
+  return credential.ssid != nullptr && ssid != nullptr &&
+         strcmp(credential.ssid, ssid) == 0;
+}
+
+const char *enterpriseIdentityMode(const char *identity, const char *username) {
+  if (identity == nullptr || strlen(identity) == 0) {
+    return "blank";
+  }
+  if (strcmp(identity, "anonymous") == 0 ||
+      strstr(identity, "anonymous@") == identity) {
+    return "anonymous";
+  }
+  if (username != nullptr && strcmp(identity, username) == 0) {
+    return "same_as_username";
+  }
+  return "custom";
+}
+
 const char *wifiCredentialAuthMode(const WiFiCredential &credential) {
   return credential.enterprise ? "peap" : "personal";
+}
+
+uint8_t *credentialBytes(const char *value) {
+  return reinterpret_cast<uint8_t *>(const_cast<char *>(value));
+}
+
+bool logEnterpriseWiFiResult(const char *step, esp_err_t err) {
+  if (err == ESP_OK) {
+    return true;
+  }
+
+  Serial.print("# PEAP ");
+  Serial.print(step);
+  Serial.print(" failed err=");
+  Serial.print(static_cast<int>(err));
+  Serial.print(" (");
+  Serial.print(esp_err_to_name(err));
+  Serial.println(")");
+  return false;
 }
 
 void disableEnterpriseWiFi() {
 #if SMOKELENS_HAS_ENTERPRISE_WIFI
 #if defined(SMOKELENS_USE_EAP_CLIENT)
   esp_wifi_sta_enterprise_disable();
+  esp_eap_client_clear_identity();
+  esp_eap_client_clear_username();
+  esp_eap_client_clear_password();
+  esp_eap_client_clear_new_password();
 #elif defined(SMOKELENS_USE_WPA2_ENT)
   esp_wifi_sta_wpa2_ent_disable();
+  esp_wifi_sta_wpa2_ent_clear_identity();
+  esp_wifi_sta_wpa2_ent_clear_username();
+  esp_wifi_sta_wpa2_ent_clear_password();
+  esp_wifi_sta_wpa2_ent_clear_new_password();
 #endif
 #endif
 }
 
-uint8_t *credentialBytes(const char *value) {
-  return reinterpret_cast<uint8_t *>(const_cast<char *>(value));
+void configureWiFiDebugLogging() {
+  if (!WIFI_VERBOSE_EAP_LOGS) {
+    return;
+  }
+
+  Serial.setDebugOutput(true);
+  esp_log_level_set("*", ESP_LOG_INFO);
+  esp_log_level_set("wifi", ESP_LOG_VERBOSE);
+  esp_log_level_set("wpa", ESP_LOG_VERBOSE);
+  esp_log_level_set("eap", ESP_LOG_VERBOSE);
+  esp_log_level_set("wpa_supplicant", ESP_LOG_VERBOSE);
+  Serial.println("# WiFi debug logs enabled");
 }
 
 bool configureEnterpriseWiFi(const WiFiCredential &credential) {
@@ -292,17 +366,92 @@ bool configureEnterpriseWiFi(const WiFiCredential &credential) {
     return false;
   }
 
+  Serial.print("# PEAP begin using low-level enterprise API identity_len=");
+  Serial.print(strlen(identity));
+  Serial.print(" username_len=");
+  Serial.print(strlen(username));
+  Serial.print(" password_len=");
+  Serial.print(strlen(password));
+  Serial.print(" identity_mode=");
+  Serial.println(enterpriseIdentityMode(identity, username));
+
+  if (wifiSsidEquals(credential, "ntu_peap")) {
+    if (strstr(username, "@ntu.edu.tw") != nullptr) {
+      Serial.println("# PEAP hint: NTU docs say ntu_peap username should omit @ntu.edu.tw");
+    }
+    if (strlen(identity) == 0) {
+      Serial.println("# PEAP hint: trying blank outer identity for ntu_peap");
+    }
+    if (strstr(identity, "@ntu.edu.tw") != nullptr) {
+      Serial.println("# PEAP hint: try outer identity without @ntu.edu.tw or use anonymous outer identity");
+    }
+  }
+
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+
 #if defined(SMOKELENS_USE_EAP_CLIENT)
-  esp_eap_client_set_identity(credentialBytes(identity), strlen(identity));
-  esp_eap_client_set_username(credentialBytes(username), strlen(username));
-  esp_eap_client_set_password(credentialBytes(password), strlen(password));
-  esp_wifi_sta_enterprise_enable();
+  esp_eap_client_clear_identity();
+  esp_eap_client_clear_username();
+  esp_eap_client_clear_password();
+  esp_eap_client_clear_new_password();
+  if (!logEnterpriseWiFiResult("set_eap_methods",
+                               esp_eap_client_set_eap_methods(ESP_EAP_TYPE_PEAP))) {
+    return false;
+  }
+  logEnterpriseWiFiResult("disable_time_check",
+                          esp_eap_client_set_disable_time_check(true));
+  if (strlen(identity) == 0) {
+    esp_eap_client_clear_identity();
+    Serial.println("# PEAP cleared outer identity");
+  } else if (!logEnterpriseWiFiResult(
+                 "set_identity",
+                 esp_eap_client_set_identity(credentialBytes(identity),
+                                             strlen(identity)))) {
+    return false;
+  }
+  if (!logEnterpriseWiFiResult("set_username",
+                               esp_eap_client_set_username(credentialBytes(username),
+                                                           strlen(username))) ||
+      !logEnterpriseWiFiResult("set_password",
+                               esp_eap_client_set_password(credentialBytes(password),
+                                                           strlen(password))) ||
+      !logEnterpriseWiFiResult("enable_enterprise",
+                               esp_wifi_sta_enterprise_enable())) {
+    return false;
+  }
 #elif defined(SMOKELENS_USE_WPA2_ENT)
-  esp_wifi_sta_wpa2_ent_set_identity(credentialBytes(identity), strlen(identity));
-  esp_wifi_sta_wpa2_ent_set_username(credentialBytes(username), strlen(username));
-  esp_wifi_sta_wpa2_ent_set_password(credentialBytes(password), strlen(password));
-  esp_wifi_sta_wpa2_ent_enable();
+  esp_wifi_sta_wpa2_ent_clear_identity();
+  esp_wifi_sta_wpa2_ent_clear_username();
+  esp_wifi_sta_wpa2_ent_clear_password();
+  esp_wifi_sta_wpa2_ent_clear_new_password();
+  logEnterpriseWiFiResult("disable_time_check",
+                          esp_wifi_sta_wpa2_ent_set_disable_time_check(true));
+  if (strlen(identity) == 0) {
+    esp_wifi_sta_wpa2_ent_clear_identity();
+    Serial.println("# PEAP cleared outer identity");
+  } else if (!logEnterpriseWiFiResult(
+                 "set_identity",
+                 esp_wifi_sta_wpa2_ent_set_identity(credentialBytes(identity),
+                                                    strlen(identity)))) {
+    return false;
+  }
+  if (!logEnterpriseWiFiResult("set_username",
+                               esp_wifi_sta_wpa2_ent_set_username(
+                                   credentialBytes(username), strlen(username))) ||
+      !logEnterpriseWiFiResult("set_password",
+                               esp_wifi_sta_wpa2_ent_set_password(
+                                   credentialBytes(password), strlen(password))) ||
+      !logEnterpriseWiFiResult("enable_enterprise",
+                               esp_wifi_sta_wpa2_ent_enable())) {
+    return false;
+  }
 #endif
+
+  wl_status_t status = WiFi.begin(credential.ssid);
+  Serial.print("# PEAP WiFi.begin (low-level enterprise API) status=");
+  Serial.println(wifiStatusToString(status));
 
   return true;
 #endif
@@ -374,6 +523,121 @@ const char *wifiStatusToString(wl_status_t status) {
     default:
       return "WL_UNKNOWN";
   }
+}
+
+const char *wifiDisconnectReasonToString(uint8_t reason) {
+  switch (reason) {
+    case 1:
+      return "UNSPECIFIED";
+    case 2:
+      return "AUTH_EXPIRE";
+    case 3:
+      return "AUTH_LEAVE";
+    case 4:
+      return "ASSOC_EXPIRE";
+    case 5:
+      return "ASSOC_TOOMANY";
+    case 6:
+      return "NOT_AUTHED";
+    case 7:
+      return "NOT_ASSOCED";
+    case 8:
+      return "ASSOC_LEAVE";
+    case 9:
+      return "ASSOC_NOT_AUTHED";
+    case 15:
+      return "4WAY_HANDSHAKE_TIMEOUT";
+    case 16:
+      return "GROUP_KEY_UPDATE_TIMEOUT";
+    case 17:
+      return "IE_IN_4WAY_DIFFERS";
+    case 18:
+      return "GROUP_CIPHER_INVALID";
+    case 19:
+      return "PAIRWISE_CIPHER_INVALID";
+    case 20:
+      return "AKMP_INVALID";
+    case 21:
+      return "UNSUPPORTED_RSN_IE_VERSION";
+    case 22:
+      return "INVALID_RSN_IE_CAP";
+    case 23:
+      return "802_1X_AUTH_FAILED";
+    case 24:
+      return "CIPHER_SUITE_REJECTED";
+    case 200:
+      return "BEACON_TIMEOUT";
+    case 201:
+      return "NO_AP_FOUND";
+    case 202:
+      return "AUTH_FAIL";
+    case 203:
+      return "ASSOC_FAIL";
+    case 204:
+      return "HANDSHAKE_TIMEOUT";
+    case 205:
+      return "CONNECTION_FAIL";
+    case 206:
+      return "AP_TSF_RESET";
+    case 207:
+      return "ROAMING";
+    case 208:
+      return "ASSOC_COMEBACK_TIME_TOO_LONG";
+    case 209:
+      return "SA_QUERY_TIMEOUT";
+    case 210:
+      return "NO_AP_FOUND_COMPATIBLE_SECURITY";
+    case 211:
+      return "NO_AP_FOUND_AUTHMODE_THRESHOLD";
+    case 212:
+      return "NO_AP_FOUND_RSSI_THRESHOLD";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+void handleWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+#ifdef SMOKELENS_WIFI_EVENT_DISCONNECTED
+  if (event == SMOKELENS_WIFI_EVENT_CONNECTED) {
+    Serial.println("# WiFi event: connected to AP");
+    return;
+  }
+
+  if (event == SMOKELENS_WIFI_EVENT_GOT_IP) {
+    Serial.print("# WiFi event: got IP ");
+    Serial.println(WiFi.localIP());
+    return;
+  }
+
+  if (event == SMOKELENS_WIFI_EVENT_DISCONNECTED) {
+#if defined(SMOKELENS_USE_EAP_CLIENT)
+    const uint8_t reason = info.wifi_sta_disconnected.reason;
+#elif defined(SMOKELENS_USE_WPA2_ENT)
+    const uint8_t reason = info.disconnected.reason;
+#else
+    const uint8_t reason = 0;
+#endif
+    const uint32_t now = millis();
+    if (reason == 23) {
+      currentWiFiAttemptAuthFailed = true;
+    }
+    if (reason == lastWiFiDisconnectReason &&
+        now - lastWiFiDisconnectReasonPrintMs < 5000UL) {
+      return;
+    }
+    lastWiFiDisconnectReason = reason;
+    lastWiFiDisconnectReasonPrintMs = now;
+
+    Serial.print("# WiFi event: disconnected reason=");
+    Serial.print(reason);
+    Serial.print(" (");
+    Serial.print(wifiDisconnectReasonToString(reason));
+    Serial.println(")");
+  }
+#else
+  (void)event;
+  (void)info;
+#endif
 }
 
 uint16_t readU16BE(const uint8_t *buffer, size_t index) {
@@ -508,41 +772,7 @@ PMS5003TData readPMS5003T() {
   return latest;
 }
 
-void startWiFiAttempt() {
-  const int nextIndex = nextValidWiFiCredentialIndex();
-  if (nextIndex < 0) {
-    Serial.println("# WiFi skipped: update WiFi credentials and MQTT servers first");
-    return;
-  }
-
-  currentWiFiCredentialIndex = nextIndex;
-  const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
-  MQTT_SERVER = mqttServerForCredential(credential);
-
-  if (mqtt.connected()) {
-    mqtt.disconnect();
-  }
-  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
-  WiFi.disconnect(true);
-  disableEnterpriseWiFi();
-  delay(100);
-
-  if (credential.enterprise) {
-    if (!configureEnterpriseWiFi(credential)) {
-      Serial.println("# WiFi skipped: PEAP configuration failed");
-      return;
-    }
-    WiFi.begin(credential.ssid);
-  } else {
-    WiFi.begin(credential.ssid, credential.password);
-  }
-
-  lastWiFiAttemptMs = millis();
-  lastWiFiStatusPrintMs = lastWiFiAttemptMs;
-  mqttTcpDiagnosticPrinted = false;
-  wifiWasConnected = false;
-
-  Serial.print("# WiFi connecting to ");
+void printWiFiCredentialSummary(const WiFiCredential &credential) {
   Serial.print(credential.ssid);
   Serial.print(" (");
   Serial.print(currentWiFiCredentialIndex + 1);
@@ -550,8 +780,113 @@ void startWiFiAttempt() {
   Serial.print(WIFI_CREDENTIAL_COUNT);
   Serial.print(") auth=");
   Serial.print(wifiCredentialAuthMode(credential));
-  Serial.print(" mqtt=");
-  Serial.println(MQTT_SERVER);
+}
+
+uint32_t wifiConnectTimeoutMsForCredential(const WiFiCredential &credential) {
+  return credential.enterprise ? WIFI_ENTERPRISE_CONNECT_TIMEOUT_MS
+                               : WIFI_PERSONAL_CONNECT_TIMEOUT_MS;
+}
+
+bool scanWiFiForCredential(const WiFiCredential &credential) {
+  Serial.print("# WiFi scanning for ");
+  printWiFiCredentialSummary(credential);
+  Serial.println();
+
+  const int networkCount = WiFi.scanNetworks(false, true);
+  if (networkCount < 0) {
+    Serial.print("# WiFi scan failed code=");
+    Serial.println(networkCount);
+    return true;
+  }
+
+  int matches = 0;
+  int bestRssi = -999;
+  int bestChannel = 0;
+
+  for (int i = 0; i < networkCount; ++i) {
+    if (WiFi.SSID(i) != credential.ssid) {
+      continue;
+    }
+
+    matches += 1;
+    if (WiFi.RSSI(i) > bestRssi) {
+      bestRssi = WiFi.RSSI(i);
+      bestChannel = WiFi.channel(i);
+    }
+  }
+
+  Serial.print("# WiFi scan result for ");
+  printWiFiCredentialSummary(credential);
+  Serial.print(" visible=");
+  Serial.print(matches > 0 ? "yes" : "no");
+  Serial.print(" matches=");
+  Serial.print(matches);
+  Serial.print(" scanned=");
+  Serial.print(networkCount);
+  if (matches > 0) {
+    Serial.print(" best_rssi=");
+    Serial.print(bestRssi);
+    Serial.print(" channel=");
+    Serial.print(bestChannel);
+  }
+  Serial.println();
+  WiFi.scanDelete();
+
+  return matches > 0;
+}
+
+void startWiFiAttempt() {
+  for (size_t attempt = 0; attempt < WIFI_CREDENTIAL_COUNT; ++attempt) {
+    const int nextIndex = nextValidWiFiCredentialIndex();
+    if (nextIndex < 0) {
+      Serial.println("# WiFi skipped: update WiFi credentials and MQTT servers first");
+      return;
+    }
+
+    currentWiFiCredentialIndex = nextIndex;
+    const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+    MQTT_SERVER = mqttServerForCredential(credential);
+
+    if (mqtt.connected()) {
+      mqtt.disconnect();
+    }
+    mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+    WiFi.disconnect(true);
+    disableEnterpriseWiFi();
+    delay(100);
+
+    if (!scanWiFiForCredential(credential)) {
+      Serial.println("# WiFi skipped: SSID not visible");
+      continue;
+    }
+
+    if (credential.enterprise) {
+      if (!configureEnterpriseWiFi(credential)) {
+        Serial.println("# WiFi skipped: PEAP configuration failed");
+        continue;
+      }
+    } else {
+      WiFi.begin(credential.ssid, credential.password);
+    }
+
+    lastWiFiAttemptMs = millis();
+    lastWiFiStatusPrintMs = lastWiFiAttemptMs;
+    mqttTcpDiagnosticPrinted = false;
+    wifiWasConnected = false;
+    currentWiFiAttemptAuthFailed = false;
+
+    Serial.print("# WiFi connecting to ");
+    printWiFiCredentialSummary(credential);
+    Serial.print(" mqtt=");
+    Serial.print(MQTT_SERVER);
+    Serial.print(" timeout_s=");
+    Serial.println(wifiConnectTimeoutMsForCredential(credential) / 1000UL);
+    return;
+  }
+
+  lastWiFiAttemptMs = millis();
+  lastWiFiStatusPrintMs = lastWiFiAttemptMs;
+  Serial.println("# WiFi skipped: no configured SSID is currently visible");
 }
 
 void beginWiFi() {
@@ -586,20 +921,37 @@ void maintainWiFi() {
   }
 
   const uint32_t elapsedMs = millis() - lastWiFiAttemptMs;
+  const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+  const uint32_t connectTimeoutMs = wifiConnectTimeoutMsForCredential(credential);
 
-  if (millis() - lastWiFiStatusPrintMs >= WIFI_STATUS_PRINT_INTERVAL_MS) {
-    lastWiFiStatusPrintMs = millis();
-    Serial.print("# WiFi waiting status=");
-    Serial.print(wifiStatusToString(WiFi.status()));
-    Serial.print(" elapsed_s=");
-    Serial.println(elapsedMs / 1000UL);
-  }
-
-  if (elapsedMs < WIFI_CONNECT_TIMEOUT_MS) {
+  if (currentWiFiAttemptAuthFailed) {
+    Serial.print("# WiFi auth failed for ");
+    printWiFiCredentialSummary(credential);
+    Serial.println("; trying next saved network");
+    currentWiFiAttemptAuthFailed = false;
+    startWiFiAttempt();
     return;
   }
 
-  Serial.print("# WiFi connect timeout status=");
+  if (millis() - lastWiFiStatusPrintMs >= WIFI_STATUS_PRINT_INTERVAL_MS) {
+    lastWiFiStatusPrintMs = millis();
+    Serial.print("# WiFi waiting for ");
+    printWiFiCredentialSummary(credential);
+    Serial.print(" status=");
+    Serial.print(wifiStatusToString(WiFi.status()));
+    Serial.print(" elapsed_s=");
+    Serial.print(elapsedMs / 1000UL);
+    Serial.print(" timeout_s=");
+    Serial.println(connectTimeoutMs / 1000UL);
+  }
+
+  if (elapsedMs < connectTimeoutMs) {
+    return;
+  }
+
+  Serial.print("# WiFi connect timeout for ");
+  printWiFiCredentialSummary(credential);
+  Serial.print(" status=");
   Serial.println(wifiStatusToString(WiFi.status()));
   Serial.println("# WiFi trying next saved network");
   startWiFiAttempt();
@@ -763,6 +1115,8 @@ void sampleAndPublish() {
 void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(300);
+  configureWiFiDebugLogging();
+  WiFi.onEvent(handleWiFiEvent);
 
   snprintf(mqttTopic, sizeof(mqttTopic), "smokelens/%s/data", NODE_ID);
 

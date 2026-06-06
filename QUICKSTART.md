@@ -197,6 +197,12 @@ Serial Monitor 會印出目前嘗試哪個 SSID：
 
 `SMOKELENS_WIFI_PERSONAL` 用於一般 WiFi。`SMOKELENS_WIFI_PEAP` 用於 `ntu_peap` 這類 WPA2-Enterprise/PEAP WiFi，參數依序是 SSID、identity、username、password、該 WiFi 下的筆電 MQTT broker IP。
 
+如果 Serial Monitor 出現 `reason=23 (802_1X_AUTH_FAILED)`，代表 AP 有收到 802.1X 驗證但拒絕登入，優先檢查：
+
+1. `username` 是否是校方要求的格式。依 NTU 官方 `ntu_peap` 說明，帳號通常要用 NTU email account，但不要包含 `@ntu.edu.tw`。
+2. `identity` 是否要跟 `username` 一樣，或改成匿名 outer identity（例如留空、`anonymous`、`anonymous@ntu.edu.tw`，依校方規則）。
+3. 密碼是否與入口網站 / 筆電實際可登入 `ntu_peap` 的那組一致。
+
 注意：多組 WiFi 只解決「ESP32 要連哪個 WiFi」。如果 MQTT broker 跑在筆電上，每一列最後的 MQTT IP 要填當下筆電在那個 WiFi 裡的 IP。
 
 ## 5. 查筆電 IP

@@ -1,4 +1,7 @@
 .pio/
+.arduino-build/
+.arduino-build-probe/
+.arduino-cache/
 .vscode/
 .env/
 __pycache__/

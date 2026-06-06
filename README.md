@@ -188,6 +188,15 @@ for normal WPA/WPA2 networks and `SMOKELENS_WIFI_PEAP` for `ntu_peap`:
 Rows with only SSID/password still work and fall back to
 `SMOKELENS_MQTT_SERVER`, but the helper macros are easier to read.
 
+If Serial Monitor later shows `reason=23 (802_1X_AUTH_FAILED)` for
+`ntu_peap`, the ESP32 reached the 802.1X login step and the AP rejected the
+credentials. NTU's setup guide says the account should typically use the NTU
+email account name without `@ntu.edu.tw`. Also check whether NTU expects the `username` in a different format,
+whether the PEAP `identity` should match the username or use an anonymous
+outer identity such as a blank value, `anonymous`, or
+`anonymous@ntu.edu.tw`, and whether the
+password matches the one that works from a laptop on the same WiFi.
+
 然後填入 WiFi SSID、password、筆電 MQTT broker IP 和 node ID。韌體支援多組 WiFi，會依序嘗試 `SMOKELENS_WIFI_CREDENTIALS` 裡的 SSID；舊的單組 `SMOKELENS_WIFI_SSID` / `SMOKELENS_WIFI_PASSWORD` 寫法也仍可用。
 
 ## Current Focus

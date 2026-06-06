@@ -143,7 +143,69 @@ backend_rule_v0
 
 This is a backend placeholder until trained model parameters are available.
 
-## 2.2 GPIO Button Test Sketch
+## 2.2 Paused NTU PEAP Debugging
+
+Status: paused on `ntu-peap` while USB/serial stability is checked.
+
+What was added on this branch:
+
+- Added WPA2-Enterprise/PEAP support paths for `ntu_peap`.
+- Switched PEAP connection code to the lower-level ESP32 enterprise API so the
+  firmware can explicitly configure identity, username, password, PEAP method,
+  and certificate time-check behavior.
+- Added WiFi scan diagnostics before each connection attempt, including SSID
+  visibility, match count, best RSSI, and channel.
+- Added disconnect reason logging, with special handling for
+  `reason=23 (802_1X_AUTH_FAILED)` so the firmware can skip quickly to the
+  next saved credential variant.
+- Added `tools/NtuPeapProbe/NtuPeapProbe.ino`, a minimal probe sketch that
+  isolates PEAP authentication from SmokeLens sensors, MQTT, and fallback
+  logic. It tests each `ntu_peap` enterprise credential with both PEAP-only
+  and all-EAP-methods variants.
+- Added `npm run mqtt:tail` for quickly watching live MQTT readings while
+  debugging network behavior.
+
+Observed results so far:
+
+- The `ntu_peap` SSID is visible to the ESP32, with multiple AP matches.
+- Phone and laptop can connect to `ntu_peap` with the same account, so the
+  account itself is likely valid.
+- ESP32 attempts with blank outer identity, anonymous outer identity, and
+  same-as-username outer identity all reached 802.1X and failed with
+  `reason=23 (802_1X_AUTH_FAILED)`.
+- Earlier blank identity setup failed with `ESP_ERR_INVALID_ARG`; clearing the
+  identity instead fixed the configuration step, but authentication still
+  failed at the AP/RADIUS stage.
+- Arduino IDE showed the `/dev/cu.usbserial-110` port appearing/disappearing
+  roughly once per second. Upload attempts also hit `Device not configured` and
+  `Resource busy`, and Serial Monitor was seen holding the port. This suggests
+  a separate USB cable/hub/serial stability issue that should be fixed before
+  continuing PEAP tests.
+
+Current interpretation:
+
+- `reason=23` means the ESP32 reaches the enterprise authentication exchange
+  and is rejected; it is no longer just an SSID visibility or MQTT issue.
+- Because phone/laptop login succeeds, the remaining likely causes are ESP32
+  PEAP/MSCHAPv2 compatibility with NTU's RADIUS configuration, a subtle account
+  formatting requirement, or an untested enterprise setting such as certificate
+  validation behavior.
+- The USB instability should be resolved first, otherwise flashing and serial
+  logs are not reliable enough for the next debug round.
+
+Next steps when resuming:
+
+1. Plug the ESP32 directly into the Mac with a known data-capable USB cable,
+   close Arduino Serial Monitor, and confirm `/dev/cu.usbserial-110` stays
+   stable.
+2. Compile and upload `tools/NtuPeapProbe/NtuPeapProbe.ino`.
+3. Capture the full `# ntu_peap probe boot` log at 115200 baud.
+4. Compare PEAP-only versus all-EAP-methods behavior and any lower-level
+   `wpa/eap` debug messages.
+5. If probe still reports only `802_1X_AUTH_FAILED`, check NTU's exact PEAP
+   requirements for ESP32-class clients or test another ESP32 core/version.
+
+## 2.3 GPIO Button Test Sketch
 
 Before testing full firmware, use:
 

@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "export:csv": "node scripts/export-csv.js"
+    "export:csv": "node scripts/export-csv.js",
+    "mqtt:tail": "node scripts/mqtt-tail.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
