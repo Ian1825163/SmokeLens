@@ -272,6 +272,14 @@ async function openDatabase(config) {
       }
     }
 
+    if (options.receivedFrom !== undefined) {
+      const receivedFrom = nullableInteger(options.receivedFrom);
+      if (receivedFrom !== null) {
+        where.push("received_at >= ?");
+        params.push(receivedFrom);
+      }
+    }
+
     const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
     const orderSql = options.ascending
       ? "ORDER BY timestamp ASC, id ASC"

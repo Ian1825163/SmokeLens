@@ -9,6 +9,8 @@ const { classifyReading, inferReading } = require("./classifier");
 const { openDatabase } = require("./db");
 const { READING_COLUMNS, rowToCsv } = require("./csv");
 
+const SERVER_STARTED_AT = Date.now();
+
 function topicNodeId(topic) {
   const parts = String(topic).split("/");
   if (parts.length >= 3 && parts[0] === "smokelens" && parts[2] === "data") {
@@ -92,6 +94,8 @@ function registerRoutes(app, wss, store) {
       mqtt_url: config.mqttUrl,
       mqtt_topic: config.mqttTopic,
       db_path: config.dbPath,
+      server_started_at: SERVER_STARTED_AT,
+      server_started_at_iso: new Date(SERVER_STARTED_AT).toISOString(),
       websocket_clients: wss.clients.size
     });
   });
@@ -130,10 +134,13 @@ function registerRoutes(app, wss, store) {
   });
 
   app.get("/api/export.csv", (req, res) => {
+    const sinceStart =
+      req.query.since_start === "1" || req.query.since_start === "true";
     const rows = store.historyReadings({
       nodeId: req.query.node_id,
       from: req.query.from,
       to: req.query.to,
+      receivedFrom: sinceStart ? SERVER_STARTED_AT : undefined,
       limit: req.query.limit || config.exportLimitMax,
       maxLimit: config.exportLimitMax,
       ascending: true
