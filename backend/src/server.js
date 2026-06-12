@@ -38,7 +38,11 @@ function buildReading(topic, payloadBuffer) {
   };
 
   if (reading.mode === "inference") {
-    Object.assign(reading, inferReading(reading));
+    if (reading.inference_class !== undefined && reading.inference_class !== null) {
+      reading.classification = reading.inference_class;
+    } else {
+      Object.assign(reading, inferReading(reading));
+    }
   }
 
   if (!reading.classification) {

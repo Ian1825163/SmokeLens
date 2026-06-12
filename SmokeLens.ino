@@ -50,6 +50,40 @@ struct WiFiCredential {
   const char *mqttServer;
 };
 
+struct PMS5003TData {
+  bool valid;
+  uint16_t pm1_0;
+  uint16_t pm2_5;
+  uint16_t pm10;
+  float temperature;
+  float humidity;
+};
+
+enum class NodeMode {
+  Inference,
+  DataCollection
+};
+
+enum class CollectionLabel {
+  NormalAir,
+  CookingFume,
+  VehicleExhaust,
+  CigaretteSmoke
+};
+
+struct ButtonSnapshot {
+  bool dataCollectionMode;
+  bool cookingFume;
+  bool vehicleExhaust;
+  bool cigaretteSmoke;
+};
+
+struct LocalInferenceResult {
+  const char *className;
+  float score;
+  bool cigaretteDetected;
+};
+
 const WiFiCredential WIFI_CREDENTIALS[] = SMOKELENS_WIFI_CREDENTIALS;
 const size_t WIFI_CREDENTIAL_COUNT =
     sizeof(WIFI_CREDENTIALS) / sizeof(WIFI_CREDENTIALS[0]);
@@ -96,7 +130,87 @@ const uint8_t ADC_SAMPLE_COUNT = 10;
 const uint16_t PMS_FRAME_SIZE = 32;
 const uint16_t PMS_PAYLOAD_LENGTH = 28;
 
-const char *INFERENCE_MODEL_VERSION = "backend_pending";
+// =========================
+// Model Configuration & Helper
+// =========================
+const char *INFERENCE_MODEL_VERSION = "smokelens_linear_seed113";
+const int MODEL_NUM_FEATURES = 7;
+const int MODEL_NUM_CLASSES = 4;
+
+const char *MODEL_CLASS_LABELS[MODEL_NUM_CLASSES] = {
+  "normal_air",
+  "cooking_fume",
+  "vehicle_exhaust",
+  "cigarette_smoke"
+};
+
+const float MODEL_FEATURE_MEAN[MODEL_NUM_FEATURES] = {
+  2305.9228515625f, 2926.101318359375f, 18.160184860229492f, 
+  30.715734481811523f, 34.105289459228516f, 25.300392150878906f, 61.660335540771484f
+};
+
+const float MODEL_FEATURE_STD[MODEL_NUM_FEATURES] = {
+  125.2475814819336f, 136.65179443359375f, 21.20924949645996f, 
+  39.511295318603516f, 43.04029083251953f, 1.9894168376922607f, 5.42022180557251f
+};
+
+const float MODEL_WEIGHTS[MODEL_NUM_CLASSES][MODEL_NUM_FEATURES] = {
+  {-1.960134506225586f, -2.133476495742798f, -2.2325689792633057f, -2.4307498931884766f, -2.419905662536621f, -1.4403796195983887f, -0.966325581073761f},
+  {2.926833391189575f, 3.018388032913208f, 1.1783685684204102f, 0.9495610594749451f, 1.1327452659606934f, 1.0835360288619995f, 0.27909553050994873f},
+  {-1.524131417274475f, -1.0074303150177002f, 0.7594223022460938f, 1.6815906763076782f, 1.1190974712371826f, 3.533674955368042f, 1.9251497983932495f},
+  {-0.5985096096992493f, -0.5337437391281128f, 1.4528228044509888f, 1.1665853261947632f, 1.2531754970550537f, -2.854031562805176f, -2.2625951766967773f}
+};
+
+const float MODEL_BIAS[MODEL_NUM_CLASSES] = {
+  -1.330094575881958f, -0.19149479269981384f, 1.7388094663619995f, 0.1915421038866043f
+};
+
+
+
+LocalInferenceResult runLocalInference(float voc_mv, float co_mv, float pm1_0, float pm2_5, float pm10, float temp, float humid) {
+  float inputs[MODEL_NUM_FEATURES] = { voc_mv, co_mv, pm1_0, pm2_5, pm10, temp, humid };
+  float standardized[MODEL_NUM_FEATURES];
+  
+  for (int i = 0; i < MODEL_NUM_FEATURES; i++) {
+    standardized[i] = (inputs[i] - MODEL_FEATURE_MEAN[i]) / MODEL_FEATURE_STD[i];
+  }
+  
+  float logits[MODEL_NUM_CLASSES];
+  float maxLogit = -1e9f;
+  for (int c = 0; c < MODEL_NUM_CLASSES; c++) {
+    logits[c] = MODEL_BIAS[c];
+    for (int f = 0; f < MODEL_NUM_FEATURES; f++) {
+      logits[c] += MODEL_WEIGHTS[c][f] * standardized[f];
+    }
+    if (logits[c] > maxLogit) {
+      maxLogit = logits[c];
+    }
+  }
+  
+  float exps[MODEL_NUM_CLASSES];
+  float sumExp = 0.0f;
+  for (int c = 0; c < MODEL_NUM_CLASSES; c++) {
+    exps[c] = expf(logits[c] - maxLogit);
+    sumExp += exps[c];
+  }
+  
+  int bestIndex = 0;
+  float bestProb = 0.0f;
+  for (int c = 0; c < MODEL_NUM_CLASSES; c++) {
+    float prob = exps[c] / sumExp;
+    if (prob > bestProb) {
+      bestProb = prob;
+      bestIndex = c;
+    }
+  }
+  
+  LocalInferenceResult res;
+  res.className = MODEL_CLASS_LABELS[bestIndex];
+  res.score = bestProb;
+  res.cigaretteDetected = (bestIndex == 3);
+  return res;
+}
+
 
 HardwareSerial pmsSerial(2);
 WiFiClient wifiClient;
@@ -112,33 +226,7 @@ bool timeConfigured = false;
 bool wifiWasConnected = false;
 bool mqttTcpDiagnosticPrinted = false;
 
-struct PMS5003TData {
-  bool valid;
-  uint16_t pm1_0;
-  uint16_t pm2_5;
-  uint16_t pm10;
-  float temperature;
-  float humidity;
-};
 
-enum class NodeMode {
-  Inference,
-  DataCollection
-};
-
-enum class CollectionLabel {
-  NormalAir,
-  CookingFume,
-  VehicleExhaust,
-  CigaretteSmoke
-};
-
-struct ButtonSnapshot {
-  bool dataCollectionMode;
-  bool cookingFume;
-  bool vehicleExhaust;
-  bool cigaretteSmoke;
-};
 
 const char *modeToString(NodeMode mode) {
   return mode == NodeMode::DataCollection ? "data_collection" : "inference";
@@ -689,6 +777,32 @@ void sampleAndPublish() {
 
   digitalWrite(CIGARETTE_LED_PIN, LOW);
 
+  // Local inference variables
+  const char *infClass = nullptr;
+  float infScore = 0.0f;
+  bool cigDetected = false;
+  const char *modelVer = "backend_pending";
+
+  if (mode == NodeMode::Inference && pms.valid) {
+    LocalInferenceResult localRes = runLocalInference(
+      static_cast<float>(vocMilliVolt),
+      static_cast<float>(coMilliVolt),
+      static_cast<float>(pms.pm1_0),
+      static_cast<float>(pms.pm2_5),
+      static_cast<float>(pms.pm10),
+      pms.temperature,
+      pms.humidity
+    );
+    infClass = localRes.className;
+    infScore = localRes.score;
+    cigDetected = localRes.cigaretteDetected;
+    modelVer = INFERENCE_MODEL_VERSION;
+
+    if (cigDetected) {
+      digitalWrite(CIGARETTE_LED_PIN, HIGH);
+    }
+  }
+
   StaticJsonDocument<768> doc;
   JsonObject root = doc.to<JsonObject>();
   root["node_id"] = NODE_ID;
@@ -696,10 +810,17 @@ void sampleAndPublish() {
   root["mode"] = modeToString(mode);
   root["collection_label"] =
       mode == NodeMode::DataCollection ? labelToString(collectionLabel) : nullptr;
-  root["model_version"] = INFERENCE_MODEL_VERSION;
-  root["inference_class"] = nullptr;
-  root["cigarette_detected"] = false;
-  root["inference_score"] = nullptr;
+  
+  root["model_version"] = modelVer;
+  if (infClass != nullptr) {
+    root["inference_class"] = infClass;
+    root["inference_score"] = infScore;
+  } else {
+    root["inference_class"] = nullptr;
+    root["inference_score"] = nullptr;
+  }
+  root["cigarette_detected"] = cigDetected;
+
   root["voc_raw"] = vocRaw;
   root["co_raw"] = coRaw;
   root["voc_mv"] = vocMilliVolt;
@@ -711,7 +832,7 @@ void sampleAndPublish() {
   buttonJson["cooking_fume"] = buttons.cookingFume;
   buttonJson["vehicle_exhaust"] = buttons.vehicleExhaust;
   buttonJson["cigarette_smoke"] = buttons.cigaretteSmoke;
-  buttonJson["led_cigarette"] = false;
+  buttonJson["led_cigarette"] = cigDetected;
 
   char payload[768];
   size_t payloadLength = serializeJson(root, payload, sizeof(payload));
@@ -721,7 +842,15 @@ void sampleAndPublish() {
     bool published = mqtt.publish(mqttTopic, reinterpret_cast<const uint8_t *>(payload),
                                   payloadLength);
     if (!published) {
-      Serial.println("# MQTT publish failed");
+      Serial.printf(
+          "# MQTT publish failed: connected=%s state=%d payload_bytes=%u buffer_bytes=%u wifi_rssi=%d heap=%u\n",
+          mqtt.connected() ? "true" : "false",
+          mqtt.state(),
+          static_cast<unsigned int>(payloadLength),
+          static_cast<unsigned int>(mqtt.getBufferSize()),
+          WiFi.RSSI(),
+          static_cast<unsigned int>(ESP.getFreeHeap())
+      );
     }
   }
 }
@@ -738,7 +867,9 @@ void setup() {
   pmsSerial.begin(PMS_BAUD, SERIAL_8N1, PMS_RX_PIN, PMS_TX_PIN);
 
   mqtt.setServer(MQTT_SERVER, MQTT_PORT);
-  mqtt.setBufferSize(512);
+  mqtt.setBufferSize(1024);
+  mqtt.setKeepAlive(30);
+  mqtt.setSocketTimeout(5);
 
   Serial.println("# SmokeLens node boot");
   Serial.print("# MQTT topic=");
@@ -751,6 +882,7 @@ void setup() {
 }
 
 void loop() {
+  mqtt.loop();
   maintainWiFi();
   maintainMQTT();
 
@@ -759,6 +891,5 @@ void loop() {
     sampleAndPublish();
   }
 
-  mqtt.loop();
   delay(10);
 }
