@@ -9,6 +9,7 @@ import json
 import math
 import random
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 
 
@@ -57,17 +58,17 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Path to testing CSV.",
     )
-    parser.add_argument(
-        "--model",
-        default=REPO_ROOT / "ml" / "models" / "smokelens_mlp.pt",
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
+        "--runs-dir",
+        default=REPO_ROOT / "ml" / "runs",
         type=Path,
-        help="Output PyTorch checkpoint path.",
+        help="Parent directory for timestamped run directories.",
     )
-    parser.add_argument(
-        "--history",
-        default=REPO_ROOT / "ml" / "results" / "training_history.csv",
+    output_group.add_argument(
+        "--run-dir",
         type=Path,
-        help="Output CSV for epoch loss and accuracy history.",
+        help="Exact directory for this run; it must not already exist.",
     )
     parser.add_argument(
         "--hidden-layers",
@@ -79,6 +80,24 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", default=HYPERPARAMETERS["RANDOM_SEED"], type=int)
     return parser.parse_args()
+
+
+def create_run_dir(runs_dir: Path, requested_run_dir: Path | None) -> Path:
+    if requested_run_dir is not None:
+        requested_run_dir.mkdir(parents=True, exist_ok=False)
+        return requested_run_dir
+
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    for suffix in range(1000):
+        name = timestamp if suffix == 0 else f"{timestamp}-{suffix:02d}"
+        run_dir = runs_dir / name
+        try:
+            run_dir.mkdir()
+            return run_dir
+        except FileExistsError:
+            continue
+    raise RuntimeError(f"Could not allocate a unique run directory under {runs_dir}")
 
 
 def parse_hidden_layers(value: str) -> tuple[int, ...]:
@@ -367,7 +386,11 @@ def main() -> None:
                 model.load_state_dict(best_state)
                 break
 
-    write_history(args.history, history)
+    run_dir = create_run_dir(args.runs_dir, args.run_dir)
+    model_path = run_dir / "model.pt"
+    metadata_path = run_dir / "metadata.json"
+    history_path = run_dir / "training_history.csv"
+    write_history(history_path, history)
 
     test_loss, test_labels, test_predictions = evaluate(
         torch, model, test_loader, loss_function, device
@@ -375,7 +398,6 @@ def main() -> None:
     print(f"\nTest loss: {test_loss:.6f}")
     accuracy, confusion_matrix = print_report(test_labels, test_predictions)
 
-    args.model.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {
         "model_state_dict": model.cpu().state_dict(),
         "feature_columns": FEATURE_COLUMNS,
@@ -384,9 +406,8 @@ def main() -> None:
         "labels": LABELS,
         "hyperparameters": parameters,
     }
-    torch.save(checkpoint, args.model)
+    torch.save(checkpoint, model_path)
 
-    metadata_path = args.model.with_name(f"{args.model.stem}_metadata.json")
     metadata = {
         "features": FEATURE_COLUMNS,
         "labels": LABELS,
@@ -398,13 +419,18 @@ def main() -> None:
         "epochs_trained": epochs_trained,
         "train_rows": len(y_train_rows),
         "test_rows": len(y_test_rows),
-        "history_path": str(args.history),
+        "run_dir": str(run_dir),
+        "model_path": str(model_path),
+        "history_path": str(history_path),
+        "train_path": str(args.train),
+        "test_path": str(args.test),
     }
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    print(f"\nWrote model: {args.model}")
+    print(f"\nWrote run directory: {run_dir}")
+    print(f"Wrote model: {model_path}")
     print(f"Wrote metadata: {metadata_path}")
-    print(f"Wrote training history: {args.history}")
+    print(f"Wrote training history: {history_path}")
 
 
 if __name__ == "__main__":

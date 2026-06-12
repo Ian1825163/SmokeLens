@@ -76,13 +76,17 @@ If train accuracy is high but test accuracy is low, reduce model size or add
 more diverse data. If train accuracy is low, increase model size, for example
 with `--hidden-layers 32,16`.
 
-The script writes:
+Each invocation creates its own timestamped run directory:
 
 ```text
-ml/models/smokelens_mlp.pt
-ml/models/smokelens_mlp_metadata.json
-ml/results/training_history.csv
+ml/runs/20260613-143025/
+├── model.pt
+├── metadata.json
+└── training_history.csv
 ```
+
+Use `--run-dir ml/runs/my-experiment` to choose a specific directory name.
+The script refuses to overwrite an existing run directory.
 
 Plot loss and accuracy against epoch after training:
 
@@ -90,5 +94,7 @@ Plot loss and accuracy against epoch after training:
 python3 ml/scripts/plot_training.py
 ```
 
-This writes `ml/results/loss_curve.png` and
-`ml/results/accuracy_curve.png`.
+Without arguments, this plots the latest run and writes `training_curves.png`
+into that run directory. The image contains loss and accuracy charts stacked
+vertically with an overall width-to-height ratio of 1.56. Use `--run-dir` to
+select a different run.
