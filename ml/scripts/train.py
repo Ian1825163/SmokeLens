@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a 7-input, 4-output PyTorch MLP for SmokeLens readings."""
+"""Train and evaluate the SmokeLens MLP across multiple random seeds."""
 
 from __future__ import annotations
 
@@ -8,9 +8,12 @@ import csv
 import json
 import math
 import random
+import shutil
+from collections import Counter
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from statistics import mean, pstdev
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -24,62 +27,87 @@ FEATURE_COLUMNS = [
     "temperature",
     "humidity",
 ]
-
 LABELS = ["normal_air", "cooking_fume", "vehicle_exhaust", "cigarette_smoke"]
 
-# Tune the model here. CLI options can override HIDDEN_LAYERS, MAX_EPOCHS,
-# and RANDOM_SEED without editing the file.
 HYPERPARAMETERS = {
-    "HIDDEN_LAYERS": (16,),
+    "HIDDEN_LAYERS": (4,),
     "ACTIVATION": "relu",
     "LEARNING_RATE": 0.001,
     "L2_REGULARIZATION": 0.0001,
     "BATCH_SIZE": 200,
     "MAX_EPOCHS": 500,
-    "EARLY_STOPPING": True,
-    "VALIDATION_RATIO": 0.1,
     "EARLY_STOPPING_PATIENCE": 10,
     "MIN_IMPROVEMENT": 0.0001,
-    "RANDOM_SEED": 42,
 }
+DEFAULT_SEEDS = (42, 43, 44, 45, 46)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train SmokeLens PyTorch MLP.")
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--train",
         default=REPO_ROOT / "ml" / "datasets" / "train.csv",
         type=Path,
-        help="Path to training CSV.",
+    )
+    parser.add_argument(
+        "--validation",
+        default=REPO_ROOT / "ml" / "datasets" / "validation.csv",
+        type=Path,
     )
     parser.add_argument(
         "--test",
         default=REPO_ROOT / "ml" / "datasets" / "test.csv",
         type=Path,
-        help="Path to testing CSV.",
     )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument(
-        "--runs-dir",
-        default=REPO_ROOT / "ml" / "runs",
-        type=Path,
-        help="Parent directory for timestamped run directories.",
+        "--runs-dir", default=REPO_ROOT / "ml" / "runs", type=Path
     )
-    output_group.add_argument(
-        "--run-dir",
-        type=Path,
-        help="Exact directory for this run; it must not already exist.",
-    )
+    output_group.add_argument("--run-dir", type=Path)
     parser.add_argument(
         "--hidden-layers",
         default=",".join(str(size) for size in HYPERPARAMETERS["HIDDEN_LAYERS"]),
-        help="Comma-separated hidden layer sizes.",
+        help="Comma-separated hidden layer sizes, or 'none' for a linear model.",
+    )
+    parser.add_argument(
+        "--features",
+        default=",".join(FEATURE_COLUMNS),
+        help="Comma-separated input feature columns.",
     )
     parser.add_argument(
         "--max-epochs", default=HYPERPARAMETERS["MAX_EPOCHS"], type=int
     )
-    parser.add_argument("--seed", default=HYPERPARAMETERS["RANDOM_SEED"], type=int)
+    parser.add_argument(
+        "--seeds",
+        default=",".join(str(seed) for seed in DEFAULT_SEEDS),
+        help="Comma-separated random seeds.",
+    )
     return parser.parse_args()
+
+
+def parse_positive_integers(value: str, option: str) -> tuple[int, ...]:
+    values = tuple(int(part.strip()) for part in value.split(",") if part.strip())
+    if not values or any(item <= 0 for item in values):
+        raise ValueError(f"{option} must contain positive integers")
+    return values
+
+
+def parse_hidden_layers(value: str) -> tuple[int, ...]:
+    if value.strip().lower() in {"none", "linear"}:
+        return ()
+    return parse_positive_integers(value, "--hidden-layers")
+
+
+def parse_feature_columns(value: str) -> tuple[str, ...]:
+    columns = tuple(part.strip() for part in value.split(",") if part.strip())
+    if not columns:
+        raise ValueError("--features must contain at least one feature")
+    unknown = [column for column in columns if column not in FEATURE_COLUMNS]
+    if unknown:
+        raise ValueError(f"Unknown features: {', '.join(unknown)}")
+    if len(set(columns)) != len(columns):
+        raise ValueError("--features must not contain duplicates")
+    return columns
 
 
 def create_run_dir(runs_dir: Path, requested_run_dir: Path | None) -> Path:
@@ -100,42 +128,36 @@ def create_run_dir(runs_dir: Path, requested_run_dir: Path | None) -> Path:
     raise RuntimeError(f"Could not allocate a unique run directory under {runs_dir}")
 
 
-def parse_hidden_layers(value: str) -> tuple[int, ...]:
-    layers = tuple(int(part.strip()) for part in value.split(",") if part.strip())
-    if not layers or any(layer <= 0 for layer in layers):
-        raise ValueError("--hidden-layers must contain positive integers")
-    return layers
-
-
-def load_dataset(path: Path) -> tuple[list[list[float]], list[int]]:
+def load_dataset(
+    path: Path, feature_columns: tuple[str, ...]
+) -> tuple[list[list[float]], list[int]]:
     if not path.exists():
         raise FileNotFoundError(f"Dataset not found: {path}")
 
-    x_rows: list[list[float]] = []
-    y_rows: list[int] = []
+    features = []
+    labels = []
     with path.open(newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
-        missing = set(FEATURE_COLUMNS + ["label_index"]) - set(
+        missing = set(feature_columns + ("label_index",)) - set(
             reader.fieldnames or []
         )
         if missing:
             raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
 
         for line_number, row in enumerate(reader, start=2):
-            features = [float(row[column]) for column in FEATURE_COLUMNS]
+            values = [float(row[column]) for column in feature_columns]
             label = int(row["label_index"])
-            if not all(math.isfinite(value) for value in features):
+            if not all(math.isfinite(value) for value in values):
                 raise ValueError(f"Non-finite feature at {path}:{line_number}")
             if label not in range(len(LABELS)):
                 raise ValueError(f"Invalid label_index at {path}:{line_number}")
             if row.get("label") and row["label"] != LABELS[label]:
                 raise ValueError(f"label and label_index disagree at {path}:{line_number}")
-            x_rows.append(features)
-            y_rows.append(label)
-
-    if not x_rows:
+            features.append(values)
+            labels.append(label)
+    if not features:
         raise ValueError(f"Dataset is empty: {path}")
-    return x_rows, y_rows
+    return features, labels
 
 
 def activation_layer(torch_nn, name: str):
@@ -148,14 +170,13 @@ def activation_layer(torch_nn, name: str):
     try:
         return activations[name.lower()]()
     except KeyError as error:
-        raise ValueError(
-            f"Unsupported ACTIVATION={name!r}; choose from {', '.join(activations)}"
-        ) from error
+        raise ValueError(f"Unsupported activation: {name}") from error
 
 
-def build_model(torch_nn, hidden_layers: tuple[int, ...], activation: str):
+def build_model(
+    torch_nn, input_size: int, hidden_layers: tuple[int, ...], activation: str
+):
     layers = []
-    input_size = len(FEATURE_COLUMNS)
     for output_size in hidden_layers:
         layers.append(torch_nn.Linear(input_size, output_size))
         layers.append(activation_layer(torch_nn, activation))
@@ -164,11 +185,32 @@ def build_model(torch_nn, hidden_layers: tuple[int, ...], activation: str):
     return torch_nn.Sequential(*layers)
 
 
-def standardize(torch, train_features, test_features):
-    mean = train_features.mean(dim=0)
-    std = train_features.std(dim=0, unbiased=False)
-    std = torch.where(std > 0, std, torch.ones_like(std))
-    return (train_features - mean) / std, (test_features - mean) / std, mean, std
+def standardize(torch, train_features, validation_features, test_features):
+    feature_mean = train_features.mean(dim=0)
+    feature_std = train_features.std(dim=0, unbiased=False)
+    feature_std = torch.where(
+        feature_std > 0, feature_std, torch.ones_like(feature_std)
+    )
+
+    def transform(features):
+        return (features - feature_mean) / feature_std
+
+    return (
+        transform(train_features),
+        transform(validation_features),
+        transform(test_features),
+        feature_mean,
+        feature_std,
+    )
+
+
+def inverse_frequency_weights(torch, labels: list[int]):
+    counts = Counter(labels)
+    if set(counts) != set(range(len(LABELS))):
+        raise ValueError("Training data must contain all four classes")
+    total = len(labels)
+    weights = [total / (len(LABELS) * counts[index]) for index in range(len(LABELS))]
+    return torch.tensor(weights, dtype=torch.float32), counts
 
 
 def evaluate(torch, model, loader, loss_function, device):
@@ -187,36 +229,14 @@ def evaluate(torch, model, loader, loss_function, device):
     return total_loss / len(labels), labels, predictions
 
 
-def accuracy_score(labels: list[int], predictions: list[int]) -> float:
-    return sum(
-        expected == predicted
-        for expected, predicted in zip(labels, predictions)
-    ) / len(labels)
-
-
-def write_history(path: Path, history: list[dict[str, object]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "epoch",
-        "train_loss",
-        "train_accuracy",
-        "validation_loss",
-        "validation_accuracy",
-    ]
-    with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(history)
-
-
-def print_report(labels: list[int], predictions: list[int]) -> tuple[float, list[list[int]]]:
+def classification_metrics(
+    labels: list[int], predictions: list[int]
+) -> dict[str, object]:
     matrix = [[0 for _ in LABELS] for _ in LABELS]
     for expected, predicted in zip(labels, predictions):
         matrix[expected][predicted] += 1
 
-    accuracy = sum(matrix[index][index] for index in range(len(LABELS))) / len(labels)
-    print(f"Accuracy: {accuracy:.4f}\n")
-    print(f"{'class':<20} {'precision':>9} {'recall':>9} {'f1-score':>9} {'support':>9}")
+    per_class = {}
     for index, label in enumerate(LABELS):
         true_positive = matrix[index][index]
         predicted_count = sum(row[index] for row in matrix)
@@ -224,213 +244,432 @@ def print_report(labels: list[int], predictions: list[int]) -> tuple[float, list
         precision = true_positive / predicted_count if predicted_count else 0.0
         recall = true_positive / support if support else 0.0
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-        print(f"{label:<20} {precision:>9.4f} {recall:>9.4f} {f1:>9.4f} {support:>9}")
+        per_class[label] = {
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "support": support,
+        }
 
-    print("\nConfusion matrix:")
-    for row in matrix:
-        print(row)
-    return accuracy, matrix
-
-
-def main() -> None:
-    args = parse_args()
-    hidden_layers = parse_hidden_layers(args.hidden_layers)
-    parameters = {
-        **HYPERPARAMETERS,
-        "HIDDEN_LAYERS": hidden_layers,
-        "MAX_EPOCHS": args.max_epochs,
-        "RANDOM_SEED": args.seed,
+    total = len(labels)
+    accuracy = sum(matrix[index][index] for index in range(len(LABELS))) / total
+    macro_precision = mean(item["precision"] for item in per_class.values())
+    macro_recall = mean(item["recall"] for item in per_class.values())
+    macro_f1 = mean(item["f1"] for item in per_class.values())
+    weighted_precision = sum(
+        item["precision"] * item["support"] for item in per_class.values()
+    ) / total
+    weighted_recall = sum(
+        item["recall"] * item["support"] for item in per_class.values()
+    ) / total
+    weighted_f1 = sum(
+        item["f1"] * item["support"] for item in per_class.values()
+    ) / total
+    return {
+        "accuracy": accuracy,
+        "balanced_accuracy": macro_recall,
+        "macro_precision": macro_precision,
+        "macro_recall": macro_recall,
+        "macro_f1": macro_f1,
+        "weighted_precision": weighted_precision,
+        "weighted_recall": weighted_recall,
+        "weighted_f1": weighted_f1,
+        "per_class": per_class,
+        "confusion_matrix": matrix,
     }
 
-    try:
-        import torch
-        from torch import nn
-        from torch.utils.data import DataLoader, TensorDataset, random_split
-    except ModuleNotFoundError as error:
-        raise SystemExit(
-            "Missing PyTorch. Install with: "
-            "python3 -m pip install -r ml/requirements-ml.txt"
-        ) from error
 
-    random.seed(parameters["RANDOM_SEED"])
-    torch.manual_seed(parameters["RANDOM_SEED"])
+def write_history(path: Path, history: list[dict[str, object]]) -> None:
+    fieldnames = [
+        "epoch",
+        "train_loss",
+        "train_accuracy",
+        "train_macro_f1",
+        "validation_loss",
+        "validation_accuracy",
+        "validation_macro_f1",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(history)
+
+
+def print_report(metrics: dict[str, object]) -> None:
+    print(
+        f"Accuracy: {metrics['accuracy']:.4f}  "
+        f"Balanced accuracy: {metrics['balanced_accuracy']:.4f}  "
+        f"Macro F1: {metrics['macro_f1']:.4f}  "
+        f"Weighted F1: {metrics['weighted_f1']:.4f}\n"
+    )
+    print(f"{'class':<20} {'precision':>9} {'recall':>9} {'f1-score':>9} {'support':>9}")
+    for label in LABELS:
+        item = metrics["per_class"][label]
+        print(
+            f"{label:<20} {item['precision']:>9.4f} {item['recall']:>9.4f} "
+            f"{item['f1']:>9.4f} {item['support']:>9}"
+        )
+    print("\nConfusion matrix:")
+    for row in metrics["confusion_matrix"]:
+        print(row)
+
+
+def make_loader(torch, TensorDataset, DataLoader, features, labels, batch_size, shuffle, seed):
+    generator = torch.Generator().manual_seed(seed) if shuffle else None
+    return DataLoader(
+        TensorDataset(features, labels),
+        batch_size=batch_size,
+        shuffle=shuffle,
+        generator=generator,
+    )
+
+
+def train_seed(
+    torch,
+    nn,
+    DataLoader,
+    TensorDataset,
+    seed: int,
+    parameters: dict[str, object],
+    tensors: dict[str, object],
+    class_weights,
+    class_counts: Counter,
+    feature_mean,
+    feature_std,
+    feature_columns: tuple[str, ...],
+    seed_dir: Path,
+    source_paths: dict[str, Path],
+    device,
+) -> dict[str, object]:
+    random.seed(seed)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(parameters["RANDOM_SEED"])
+        torch.cuda.manual_seed_all(seed)
 
-    x_train_rows, y_train_rows = load_dataset(args.train)
-    x_test_rows, y_test_rows = load_dataset(args.test)
-    if set(y_train_rows) != set(range(len(LABELS))):
-        raise SystemExit("Training data must contain all four classes.")
-
-    x_train = torch.tensor(x_train_rows, dtype=torch.float32)
-    y_train = torch.tensor(y_train_rows, dtype=torch.long)
-    x_test = torch.tensor(x_test_rows, dtype=torch.float32)
-    y_test = torch.tensor(y_test_rows, dtype=torch.long)
-    x_train, x_test, feature_mean, feature_std = standardize(
-        torch, x_train, x_test
+    batch_size = int(parameters["BATCH_SIZE"])
+    train_loader = make_loader(
+        torch, TensorDataset, DataLoader, tensors["x_train"], tensors["y_train"],
+        batch_size, True, seed
+    )
+    train_eval_loader = make_loader(
+        torch, TensorDataset, DataLoader, tensors["x_train"], tensors["y_train"],
+        batch_size, False, seed
+    )
+    validation_loader = make_loader(
+        torch, TensorDataset, DataLoader, tensors["x_validation"],
+        tensors["y_validation"], batch_size, False, seed
+    )
+    test_loader = make_loader(
+        torch, TensorDataset, DataLoader, tensors["x_test"], tensors["y_test"],
+        batch_size, False, seed
     )
 
-    training_dataset = TensorDataset(x_train, y_train)
-    validation_dataset = None
-    if parameters["EARLY_STOPPING"]:
-        validation_size = max(
-            1, round(len(training_dataset) * parameters["VALIDATION_RATIO"])
-        )
-        training_size = len(training_dataset) - validation_size
-        generator = torch.Generator().manual_seed(parameters["RANDOM_SEED"])
-        training_dataset, validation_dataset = random_split(
-            training_dataset, [training_size, validation_size], generator=generator
-        )
-
-    loader_generator = torch.Generator().manual_seed(parameters["RANDOM_SEED"])
-    train_loader = DataLoader(
-        training_dataset,
-        batch_size=parameters["BATCH_SIZE"],
-        shuffle=True,
-        generator=loader_generator,
-    )
-    train_evaluation_loader = DataLoader(
-        training_dataset, batch_size=parameters["BATCH_SIZE"]
-    )
-    validation_loader = (
-        DataLoader(validation_dataset, batch_size=parameters["BATCH_SIZE"])
-        if validation_dataset is not None
-        else None
-    )
-    test_loader = DataLoader(
-        TensorDataset(x_test, y_test), batch_size=parameters["BATCH_SIZE"]
-    )
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_model(nn, hidden_layers, parameters["ACTIVATION"]).to(device)
-    loss_function = nn.CrossEntropyLoss()
+    model = build_model(
+        nn,
+        len(feature_columns),
+        tuple(parameters["HIDDEN_LAYERS"]),
+        str(parameters["ACTIVATION"]),
+    ).to(device)
+    loss_function = nn.CrossEntropyLoss(weight=class_weights.to(device))
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=parameters["LEARNING_RATE"],
-        weight_decay=parameters["L2_REGULARIZATION"],
+        lr=float(parameters["LEARNING_RATE"]),
+        weight_decay=float(parameters["L2_REGULARIZATION"]),
     )
 
     best_state = deepcopy(model.state_dict())
+    best_validation_macro_f1 = -1.0
     best_validation_loss = math.inf
+    best_epoch = 0
     epochs_without_improvement = 0
-    epochs_trained = 0
     history = []
 
-    print(f"Device: {device}")
-    for epoch in range(1, parameters["MAX_EPOCHS"] + 1):
+    print(f"\nSeed {seed}")
+    for epoch in range(1, int(parameters["MAX_EPOCHS"]) + 1):
         model.train()
         for features, targets in train_loader:
             features = features.to(device)
             targets = targets.to(device)
             optimizer.zero_grad()
-            logits = model(features)
-            loss = loss_function(logits, targets)
+            loss = loss_function(model(features), targets)
             loss.backward()
             optimizer.step()
 
-        epochs_trained = epoch
-        average_training_loss, training_labels, training_predictions = evaluate(
-            torch, model, train_evaluation_loader, loss_function, device
+        train_loss, train_labels, train_predictions = evaluate(
+            torch, model, train_eval_loader, loss_function, device
         )
-        training_accuracy = accuracy_score(
-            training_labels, training_predictions
-        )
-        if validation_loader is None:
-            history.append(
-                {
-                    "epoch": epoch,
-                    "train_loss": average_training_loss,
-                    "train_accuracy": training_accuracy,
-                    "validation_loss": "",
-                    "validation_accuracy": "",
-                }
-            )
-            if epoch == 1 or epoch % 10 == 0 or epoch == parameters["MAX_EPOCHS"]:
-                print(
-                    f"epoch={epoch} train_loss={average_training_loss:.6f} "
-                    f"train_accuracy={training_accuracy:.4f}"
-                )
-            continue
-
         validation_loss, validation_labels, validation_predictions = evaluate(
             torch, model, validation_loader, loss_function, device
         )
-        validation_accuracy = accuracy_score(
+        train_metrics = classification_metrics(train_labels, train_predictions)
+        validation_metrics = classification_metrics(
             validation_labels, validation_predictions
         )
         history.append(
             {
                 "epoch": epoch,
-                "train_loss": average_training_loss,
-                "train_accuracy": training_accuracy,
+                "train_loss": train_loss,
+                "train_accuracy": train_metrics["accuracy"],
+                "train_macro_f1": train_metrics["macro_f1"],
                 "validation_loss": validation_loss,
-                "validation_accuracy": validation_accuracy,
+                "validation_accuracy": validation_metrics["accuracy"],
+                "validation_macro_f1": validation_metrics["macro_f1"],
             }
         )
         if epoch == 1 or epoch % 10 == 0:
             print(
-                f"epoch={epoch} train_loss={average_training_loss:.6f} "
-                f"train_accuracy={training_accuracy:.4f} "
+                f"epoch={epoch} train_loss={train_loss:.6f} "
+                f"train_macro_f1={train_metrics['macro_f1']:.4f} "
                 f"validation_loss={validation_loss:.6f} "
-                f"validation_accuracy={validation_accuracy:.4f}"
+                f"validation_macro_f1={validation_metrics['macro_f1']:.4f}"
             )
 
-        if validation_loss < best_validation_loss - parameters["MIN_IMPROVEMENT"]:
-            best_validation_loss = validation_loss
+        improved = (
+            validation_metrics["macro_f1"]
+            > best_validation_macro_f1 + float(parameters["MIN_IMPROVEMENT"])
+        )
+        tied_but_lower_loss = (
+            abs(validation_metrics["macro_f1"] - best_validation_macro_f1)
+            <= float(parameters["MIN_IMPROVEMENT"])
+            and validation_loss < best_validation_loss
+        )
+        if improved or tied_but_lower_loss:
             best_state = deepcopy(model.state_dict())
+            best_validation_macro_f1 = validation_metrics["macro_f1"]
+            best_validation_loss = validation_loss
+            best_epoch = epoch
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
-            if epochs_without_improvement >= parameters["EARLY_STOPPING_PATIENCE"]:
+            if epochs_without_improvement >= int(parameters["EARLY_STOPPING_PATIENCE"]):
                 print(f"Early stopping at epoch {epoch}")
-                model.load_state_dict(best_state)
                 break
 
-    run_dir = create_run_dir(args.runs_dir, args.run_dir)
-    model_path = run_dir / "model.pt"
-    metadata_path = run_dir / "metadata.json"
-    history_path = run_dir / "training_history.csv"
-    write_history(history_path, history)
-
+    model.load_state_dict(best_state)
+    validation_loss, validation_labels, validation_predictions = evaluate(
+        torch, model, validation_loader, loss_function, device
+    )
     test_loss, test_labels, test_predictions = evaluate(
         torch, model, test_loader, loss_function, device
     )
-    print(f"\nTest loss: {test_loss:.6f}")
-    accuracy, confusion_matrix = print_report(test_labels, test_predictions)
+    validation_metrics = classification_metrics(validation_labels, validation_predictions)
+    test_metrics = classification_metrics(test_labels, test_predictions)
+    print(f"\nSeed {seed} test loss: {test_loss:.6f}")
+    print_report(test_metrics)
 
-    checkpoint = {
-        "model_state_dict": model.cpu().state_dict(),
-        "feature_columns": FEATURE_COLUMNS,
-        "feature_mean": feature_mean,
-        "feature_std": feature_std,
-        "labels": LABELS,
-        "hyperparameters": parameters,
-    }
-    torch.save(checkpoint, model_path)
-
+    seed_dir.mkdir()
+    model_path = seed_dir / "model.pt"
+    history_path = seed_dir / "training_history.csv"
+    metadata_path = seed_dir / "metadata.json"
+    write_history(history_path, history)
+    torch.save(
+        {
+            "model_state_dict": model.cpu().state_dict(),
+            "feature_columns": list(feature_columns),
+            "feature_mean": feature_mean,
+            "feature_std": feature_std,
+            "labels": LABELS,
+            "class_weights": class_weights,
+            "hyperparameters": parameters,
+        },
+        model_path,
+    )
     metadata = {
-        "features": FEATURE_COLUMNS,
+        "seed": seed,
+        "features": list(feature_columns),
         "labels": LABELS,
-        "label_encoding": {label: index for index, label in enumerate(LABELS)},
         "hyperparameters": parameters,
-        "accuracy": accuracy,
+        "class_counts": {LABELS[index]: class_counts[index] for index in range(len(LABELS))},
+        "class_weights": {LABELS[index]: class_weights[index].item() for index in range(len(LABELS))},
+        "best_epoch": best_epoch,
+        "epochs_trained": len(history),
+        "validation_loss": validation_loss,
+        "validation_metrics": validation_metrics,
         "test_loss": test_loss,
-        "confusion_matrix": confusion_matrix,
-        "epochs_trained": epochs_trained,
-        "train_rows": len(y_train_rows),
-        "test_rows": len(y_test_rows),
-        "run_dir": str(run_dir),
+        "test_metrics": test_metrics,
         "model_path": str(model_path),
         "history_path": str(history_path),
-        "train_path": str(args.train),
-        "test_path": str(args.test),
+        **{f"{name}_path": str(path) for name, path in source_paths.items()},
     }
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return metadata
 
-    print(f"\nWrote run directory: {run_dir}")
-    print(f"Wrote model: {model_path}")
-    print(f"Wrote metadata: {metadata_path}")
-    print(f"Wrote training history: {history_path}")
+
+def aggregate_seed_metrics(seed_results: list[dict[str, object]]) -> dict[str, object]:
+    metric_names = [
+        "accuracy",
+        "balanced_accuracy",
+        "macro_precision",
+        "macro_recall",
+        "macro_f1",
+        "weighted_precision",
+        "weighted_recall",
+        "weighted_f1",
+    ]
+    aggregate = {}
+    for metric_name in metric_names:
+        values = [result["test_metrics"][metric_name] for result in seed_results]
+        aggregate[metric_name] = {
+            "mean": mean(values),
+            "std": pstdev(values),
+            "values": values,
+        }
+    aggregate["per_class"] = {}
+    for label in LABELS:
+        aggregate["per_class"][label] = {}
+        for metric_name in ("precision", "recall", "f1"):
+            values = [
+                result["test_metrics"]["per_class"][label][metric_name]
+                for result in seed_results
+            ]
+            aggregate["per_class"][label][metric_name] = {
+                "mean": mean(values),
+                "std": pstdev(values),
+                "values": values,
+            }
+    return aggregate
+
+
+def write_metrics_csv(path: Path, seed_results: list[dict[str, object]]) -> None:
+    fieldnames = [
+        "seed",
+        "split",
+        "class",
+        "precision",
+        "recall",
+        "f1",
+        "support",
+        "accuracy",
+        "balanced_accuracy",
+        "macro_precision",
+        "macro_recall",
+        "macro_f1",
+        "weighted_precision",
+        "weighted_recall",
+        "weighted_f1",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        for result in seed_results:
+            for split in ("validation", "test"):
+                metrics = result[f"{split}_metrics"]
+                for label in LABELS:
+                    writer.writerow(
+                        {
+                            "seed": result["seed"],
+                            "split": split,
+                            "class": label,
+                            **metrics["per_class"][label],
+                            **{
+                                name: metrics[name]
+                                for name in fieldnames[7:]
+                            },
+                        }
+                    )
+
+
+def main() -> None:
+    args = parse_args()
+    hidden_layers = parse_hidden_layers(args.hidden_layers)
+    feature_columns = parse_feature_columns(args.features)
+    seeds = parse_positive_integers(args.seeds, "--seeds")
+    parameters = {
+        **HYPERPARAMETERS,
+        "HIDDEN_LAYERS": hidden_layers,
+        "FEATURE_COLUMNS": feature_columns,
+        "MAX_EPOCHS": args.max_epochs,
+    }
+
+    try:
+        import torch
+        from torch import nn
+        from torch.utils.data import DataLoader, TensorDataset
+    except ModuleNotFoundError as error:
+        raise SystemExit(
+            "Missing PyTorch. Install with: python3 -m pip install -r ml/requirements-ml.txt"
+        ) from error
+
+    x_train_rows, y_train_rows = load_dataset(args.train, feature_columns)
+    x_validation_rows, y_validation_rows = load_dataset(
+        args.validation, feature_columns
+    )
+    x_test_rows, y_test_rows = load_dataset(args.test, feature_columns)
+    class_weights, class_counts = inverse_frequency_weights(torch, y_train_rows)
+
+    x_train = torch.tensor(x_train_rows, dtype=torch.float32)
+    x_validation = torch.tensor(x_validation_rows, dtype=torch.float32)
+    x_test = torch.tensor(x_test_rows, dtype=torch.float32)
+    x_train, x_validation, x_test, feature_mean, feature_std = standardize(
+        torch, x_train, x_validation, x_test
+    )
+    tensors = {
+        "x_train": x_train,
+        "y_train": torch.tensor(y_train_rows, dtype=torch.long),
+        "x_validation": x_validation,
+        "y_validation": torch.tensor(y_validation_rows, dtype=torch.long),
+        "x_test": x_test,
+        "y_test": torch.tensor(y_test_rows, dtype=torch.long),
+    }
+    source_paths = {
+        "train": args.train,
+        "validation": args.validation,
+        "test": args.test,
+    }
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    run_dir = create_run_dir(args.runs_dir, args.run_dir)
+    print(f"Device: {device}")
+    print(f"Run directory: {run_dir}")
+    print(f"Features: {', '.join(feature_columns)}")
+    print("Class weights: " + ", ".join(
+        f"{LABELS[index]}={class_weights[index].item():.4f}"
+        for index in range(len(LABELS))
+    ))
+
+    seed_results = []
+    for seed in seeds:
+        seed_parameters = {**parameters, "RANDOM_SEED": seed}
+        seed_results.append(
+            train_seed(
+                torch, nn, DataLoader, TensorDataset, seed, seed_parameters,
+                tensors, class_weights, class_counts, feature_mean, feature_std,
+                feature_columns, run_dir / f"seed-{seed}", source_paths, device
+            )
+        )
+
+    best_result = max(
+        seed_results,
+        key=lambda result: (
+            result["validation_metrics"]["macro_f1"],
+            -result["validation_loss"],
+        ),
+    )
+    best_seed_dir = run_dir / f"seed-{best_result['seed']}"
+    for filename in ("model.pt", "training_history.csv"):
+        shutil.copyfile(best_seed_dir / filename, run_dir / filename)
+    selected_metadata = dict(best_result)
+    selected_metadata["selected_seed"] = best_result["seed"]
+    selected_metadata["model_path"] = str(run_dir / "model.pt")
+    selected_metadata["history_path"] = str(run_dir / "training_history.csv")
+    (run_dir / "metadata.json").write_text(
+        json.dumps(selected_metadata, indent=2), encoding="utf-8"
+    )
+
+    summary = {
+        "seeds": list(seeds),
+        "selected_seed": best_result["seed"],
+        "selection_metric": "validation_macro_f1",
+        "aggregate_test_metrics": aggregate_seed_metrics(seed_results),
+        "seed_results": seed_results,
+    }
+    summary_path = run_dir / "summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    metrics_path = run_dir / "metrics.csv"
+    write_metrics_csv(metrics_path, seed_results)
+    print(f"\nSelected seed: {best_result['seed']}")
+    print(f"Wrote summary: {summary_path}")
+    print(f"Wrote metrics: {metrics_path}")
+    print(f"Wrote representative model: {run_dir / 'model.pt'}")
 
 
 if __name__ == "__main__":

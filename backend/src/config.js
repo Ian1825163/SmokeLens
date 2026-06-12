@@ -55,5 +55,9 @@ module.exports = {
   nodeTimeoutMs: numberFromEnv("NODE_TIMEOUT_MS", 30000),
   historyLimitDefault: numberFromEnv("HISTORY_LIMIT_DEFAULT", 500),
   historyLimitMax: numberFromEnv("HISTORY_LIMIT_MAX", 5000),
-  exportLimitMax: numberFromEnv("EXPORT_LIMIT_MAX", 100000)
+  exportLimitMax: numberFromEnv("EXPORT_LIMIT_MAX", 100000),
+  modelPath: resolveOptionalPath(
+    process.env.MODEL_PATH,
+    path.join(repoRoot, "ml", "models", "smokelens_linear.json")
+  )
 };

@@ -5,7 +5,7 @@ const mqtt = require("mqtt");
 const { WebSocketServer, WebSocket } = require("ws");
 
 const config = require("./config");
-const { classifyReading, inferReading } = require("./classifier");
+const { classifyReading, inferReading, modelInfo } = require("./classifier");
 const { openStore } = require("./store");
 const { READING_COLUMNS, rowToCsv } = require("./csv");
 
@@ -84,7 +84,8 @@ function registerRoutes(app, wss, store) {
     res.json({
       node_locations: config.nodeLocations,
       node_timeout_ms: config.nodeTimeoutMs,
-      mqtt_topic: config.mqttTopic
+      mqtt_topic: config.mqttTopic,
+      model: modelInfo()
     });
   });
 
@@ -94,6 +95,7 @@ function registerRoutes(app, wss, store) {
       mqtt_url: config.mqttUrl,
       mqtt_topic: config.mqttTopic,
       csv_path: config.csvPath,
+      model: modelInfo(),
       server_started_at: SERVER_STARTED_AT,
       server_started_at_iso: new Date(SERVER_STARTED_AT).toISOString(),
       websocket_clients: wss.clients.size
@@ -227,6 +229,9 @@ async function main() {
   server.listen(config.httpPort, "0.0.0.0", () => {
     console.log(`[http] listening on http://localhost:${config.httpPort}`);
     console.log(`[csv] ${config.csvPath}`);
+    console.log(
+      `[model] ${modelInfo().model_version} path=${modelInfo().model_path}`
+    );
   });
 
   function shutdown() {

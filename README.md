@@ -8,7 +8,7 @@ SmokeLens 是一個分散式煙霧偵測專題。這個 repo 目前包含單一 
 ESP32 sensor node -> Mosquitto MQTT broker -> Node.js backend -> CSV / API
 ```
 
-ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料直接追加到 CSV，並負責目前的規則式 inference；同一份 CSV 可供 baseline 與 SVM-RBF 訓練使用。
+ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料追加到 CSV，並使用訓練完成的線性模型進行四類 inference。
 
 主要資料檔是 `data/smokelens.csv`，可用 `CSV_PATH` 指定其他位置。
 
@@ -48,7 +48,21 @@ Default 是 inference mode：
 
 data collection mode 會依 Button 3/5/8 輸出 `collection_label`。inference mode 仍由 ESP32 輸出 raw sensor values，但最終的 `inference_class`、`cigarette_detected`、`inference_score` 由 backend 補上。
 
-目前 backend 內的 inference 是 `backend_rule_v0` 暫時規則，不是最終訓練好的 SVM model。資料欄位已先準備好，方便之後替換成正式模型。
+backend 使用 seed 113 的 `7 -> 4` 線性模型，版本為
+`smokelens_linear_seed113`。模型輸入會先使用 checkpoint 中的 mean/std
+標準化，再計算四類 softmax probability。`inference_score` 是預測類別的
+probability，`cigarette_detected` 只在預測為 `cigarette_smoke` 時成立。
+
+模型檔案位於：
+
+```text
+ml/models/smokelens_linear.pt
+ml/models/smokelens_linear.json
+ml/models/smokelens_linear_metadata.json
+```
+
+Node.js backend 使用 JSON 版本做原生 inference，不需要在執行環境安裝
+Python 或 PyTorch。可透過 `MODEL_PATH` 指向其他相容模型 JSON。
 
 ## Backend
 
@@ -59,6 +73,7 @@ backend 使用：
 - `ws`：預留 dashboard 即時推送
 - Node.js `fs`：追加寫入 `data/smokelens.csv`
 - `Leaflet + OpenStreetMap`：顯示固定節點位置與偵測區域
+- `ml/models/smokelens_linear.json`：四類線性 inference 模型
 
 常用 API：
 
@@ -187,12 +202,12 @@ Rows with only SSID/password still work and fall back to
 
 ## Current Focus
 
-下一個重點是穩定收集 labeled data：
+下一個重點是收集更多獨立 session，驗證模型跨時間與場景的泛化：
 
 1. 確認 ESP32 -> MQTT -> backend -> CSV 全流程穩定。
 2. 分別收 normal air、cooking fume、vehicle exhaust、cigarette smoke / 替代煙源資料。
-3. 匯出 CSV 做 baseline、feature engineering。
-4. 訓練 SVM-RBF。
-5. 將訓練結果接回 inference 流程或 backend 分類流程。
+3. 以完整 session 作 train/validation/test 切分。
+4. 監測 production inference 的 false positive 與 false negative。
+5. 新模型通過跨 session 評估後再替換 `MODEL_PATH`。
 
 詳細指令請直接看 `QUICKSTART.md`。

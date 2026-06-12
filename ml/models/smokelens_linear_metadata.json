@@ -1,0 +1,183 @@
+{
+  "seed": 113,
+  "features": [
+    "voc_mv",
+    "co_mv",
+    "pm1_0",
+    "pm2_5",
+    "pm10",
+    "temperature",
+    "humidity"
+  ],
+  "labels": [
+    "normal_air",
+    "cooking_fume",
+    "vehicle_exhaust",
+    "cigarette_smoke"
+  ],
+  "hyperparameters": {
+    "HIDDEN_LAYERS": [],
+    "ACTIVATION": "relu",
+    "LEARNING_RATE": 0.001,
+    "L2_REGULARIZATION": 0.0001,
+    "BATCH_SIZE": 200,
+    "MAX_EPOCHS": 500,
+    "EARLY_STOPPING_PATIENCE": 10,
+    "MIN_IMPROVEMENT": 0.0001,
+    "FEATURE_COLUMNS": [
+      "voc_mv",
+      "co_mv",
+      "pm1_0",
+      "pm2_5",
+      "pm10",
+      "temperature",
+      "humidity"
+    ],
+    "RANDOM_SEED": 113
+  },
+  "class_counts": {
+    "normal_air": 6546,
+    "cooking_fume": 4453,
+    "vehicle_exhaust": 3158,
+    "cigarette_smoke": 3404
+  },
+  "class_weights": {
+    "normal_air": 0.6706767678260803,
+    "cooking_fume": 0.9859083890914917,
+    "vehicle_exhaust": 1.3901995420455933,
+    "cigarette_smoke": 1.2897326946258545
+  },
+  "best_epoch": 165,
+  "epochs_trained": 175,
+  "validation_loss": 0.0018182892472627837,
+  "validation_metrics": {
+    "accuracy": 1.0,
+    "balanced_accuracy": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "macro_f1": 1.0,
+    "weighted_precision": 1.0,
+    "weighted_recall": 1.0,
+    "weighted_f1": 1.0,
+    "per_class": {
+      "normal_air": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 818
+      },
+      "cooking_fume": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 557
+      },
+      "vehicle_exhaust": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 395
+      },
+      "cigarette_smoke": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 426
+      }
+    },
+    "confusion_matrix": [
+      [
+        818,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        557,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        395,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        426
+      ]
+    ]
+  },
+  "test_loss": 0.03990447021114422,
+  "test_metrics": {
+    "accuracy": 1.0,
+    "balanced_accuracy": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "macro_f1": 1.0,
+    "weighted_precision": 1.0,
+    "weighted_recall": 1.0,
+    "weighted_f1": 1.0,
+    "per_class": {
+      "normal_air": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 819
+      },
+      "cooking_fume": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 556
+      },
+      "vehicle_exhaust": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 395
+      },
+      "cigarette_smoke": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 425
+      }
+    },
+    "confusion_matrix": [
+      [
+        819,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        556,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        395,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        425
+      ]
+    ]
+  },
+  "model_path": "ml/models/smokelens_linear.pt",
+  "source_run": "ml/runs/20260613-20seed-distributed/cn12-seeds-111-120/seed-113",
+  "train_path": "ml/datasets/train.csv",
+  "validation_path": "ml/datasets/validation.csv",
+  "test_path": "ml/datasets/test.csv"
+}
