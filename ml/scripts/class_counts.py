@@ -15,6 +15,7 @@ CLASS_LABELS = [
     "vehicle_exhaust",
     "cigarette_smoke",
 ]
+EXPOSURE_STATES = ["exposure"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,28 +31,52 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_counts(db_path: Path) -> dict[str, int]:
+def has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
+    return any(
+        row[1] == column
+        for row in connection.execute(f"PRAGMA table_info({table})")
+    )
+
+
+def load_counts(db_path: Path) -> tuple[dict[str, int], bool]:
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    query = """
-        SELECT collection_label, COUNT(*) AS row_count
-        FROM readings
-        WHERE mode = 'data_collection'
-          AND collection_label IN (?, ?, ?, ?)
-        GROUP BY collection_label
-    """
-
     counts = {label: 0 for label in CLASS_LABELS}
     with sqlite3.connect(db_path) as connection:
-        for label, row_count in connection.execute(query, CLASS_LABELS):
+        has_trial_state = has_column(connection, "readings", "trial_state")
+        exposure_placeholders = ", ".join("?" for _ in EXPOSURE_STATES)
+        trial_state_filter = (
+            "AND (trial_state IS NULL OR trim(trial_state) = '' "
+            f"OR lower(trial_state) IN ({exposure_placeholders}))"
+            if has_trial_state
+            else ""
+        )
+        query = f"""
+            SELECT collection_label, COUNT(*) AS row_count
+            FROM readings
+            WHERE mode = 'data_collection'
+              AND collection_label IN (?, ?, ?, ?)
+              {trial_state_filter}
+            GROUP BY collection_label
+        """
+        params = (
+            [*CLASS_LABELS, *EXPOSURE_STATES]
+            if has_trial_state
+            else CLASS_LABELS
+        )
+        for label, row_count in connection.execute(query, params):
             counts[str(label)] = int(row_count)
-    return counts
+    return counts, has_trial_state
 
 
 def main() -> None:
     args = parse_args()
-    counts = load_counts(args.db)
+    counts, has_trial_state = load_counts(args.db)
+    if has_trial_state:
+        print("filter: untagged rows plus trial_state=exposure")
+    else:
+        print("filter: no trial_state column; counting all data_collection rows")
     total = 0
     for label in CLASS_LABELS:
         row_count = counts[label]

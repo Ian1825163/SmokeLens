@@ -16,7 +16,7 @@ ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON�
 - 目前進度與下一步：`PROGRESS.md`
 - ESP32 主程式：`SmokeLens.ino`
 - GPIO 開關測試：`tools/GpioButtonTest/GpioButtonTest.ino`
-- USB Serial CSV logger：`tools/SerialCsvLogger.ps1`
+- USB Serial CSV logger：Windows 使用 `tools/SerialCsvLogger.ps1`，macOS 使用 `tools/serial_csv_logger.py`
 - 本地 MQTT 設定：`broker/mosquitto.conf`
 - Node.js backend：`backend/`
 - 使用者 Dashboard：`http://localhost:3000/`

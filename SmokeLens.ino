@@ -87,8 +87,8 @@ const uint8_t CIGARETTE_LED_PIN = 27;
 const uint32_t SERIAL_BAUD = 115200;
 const uint32_t PMS_BAUD = 9600;
 const uint32_t SAMPLE_INTERVAL_MS = 1000UL;
-const uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000UL;
-const uint32_t WIFI_STATUS_PRINT_INTERVAL_MS = 5000UL;
+const uint32_t WIFI_CONNECT_TIMEOUT_MS = 6000UL;
+const uint32_t WIFI_STATUS_PRINT_INTERVAL_MS = 2000UL;
 const uint32_t MQTT_RETRY_INTERVAL_MS = 5000UL;
 const uint32_t PMS_READ_TIMEOUT_MS = 1500UL;
 
@@ -237,6 +237,63 @@ int nextValidWiFiCredentialIndex() {
 
 bool wifiConfigLooksValid() {
   return ENABLE_WIFI_MQTT && nextValidWiFiCredentialIndex() >= 0;
+}
+
+void printWiFiCredentialSummary(const WiFiCredential &credential) {
+  Serial.print(credential.ssid);
+  Serial.print(" (");
+  Serial.print(currentWiFiCredentialIndex + 1);
+  Serial.print("/");
+  Serial.print(WIFI_CREDENTIAL_COUNT);
+  Serial.print(")");
+}
+
+bool scanWiFiForCredential(const WiFiCredential &credential) {
+  Serial.print("# WiFi scanning for ");
+  printWiFiCredentialSummary(credential);
+  Serial.println();
+
+  const int networkCount = WiFi.scanNetworks(false, true);
+  if (networkCount < 0) {
+    Serial.print("# WiFi scan failed code=");
+    Serial.println(networkCount);
+    return true;
+  }
+
+  int matches = 0;
+  int bestRssi = -999;
+  int bestChannel = 0;
+
+  for (int i = 0; i < networkCount; ++i) {
+    if (WiFi.SSID(i) != credential.ssid) {
+      continue;
+    }
+
+    matches += 1;
+    if (WiFi.RSSI(i) > bestRssi) {
+      bestRssi = WiFi.RSSI(i);
+      bestChannel = WiFi.channel(i);
+    }
+  }
+
+  Serial.print("# WiFi scan result for ");
+  printWiFiCredentialSummary(credential);
+  Serial.print(" visible=");
+  Serial.print(matches > 0 ? "yes" : "no");
+  Serial.print(" matches=");
+  Serial.print(matches);
+  Serial.print(" scanned=");
+  Serial.print(networkCount);
+  if (matches > 0) {
+    Serial.print(" best_rssi=");
+    Serial.print(bestRssi);
+    Serial.print(" channel=");
+    Serial.print(bestChannel);
+  }
+  Serial.println();
+  WiFi.scanDelete();
+
+  return matches > 0;
 }
 
 void printNetworkDetails() {
@@ -417,35 +474,44 @@ PMS5003TData readPMS5003T() {
 }
 
 void startWiFiAttempt() {
-  const int nextIndex = nextValidWiFiCredentialIndex();
-  if (nextIndex < 0) {
-    Serial.println("# WiFi skipped: update WiFi credentials and MQTT servers first");
+  for (size_t attempt = 0; attempt < WIFI_CREDENTIAL_COUNT; ++attempt) {
+    const int nextIndex = nextValidWiFiCredentialIndex();
+    if (nextIndex < 0) {
+      Serial.println("# WiFi skipped: update WiFi credentials and MQTT servers first");
+      return;
+    }
+
+    currentWiFiCredentialIndex = nextIndex;
+    const WiFiCredential &credential =
+        WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+    MQTT_SERVER = mqttServerForCredential(credential);
+
+    if (mqtt.connected()) {
+      mqtt.disconnect();
+    }
+    mqtt.setServer(MQTT_SERVER, MQTT_PORT);
+    WiFi.disconnect(false);
+
+    if (!scanWiFiForCredential(credential)) {
+      Serial.println("# WiFi SSID not visible; attempting direct connection anyway");
+    }
+
+    WiFi.begin(credential.ssid, credential.password);
+    lastWiFiAttemptMs = millis();
+    lastWiFiStatusPrintMs = lastWiFiAttemptMs;
+    mqttTcpDiagnosticPrinted = false;
+    wifiWasConnected = false;
+
+    Serial.print("# WiFi connecting to ");
+    printWiFiCredentialSummary(credential);
+    Serial.print(" mqtt=");
+    Serial.println(MQTT_SERVER);
     return;
   }
 
-  currentWiFiCredentialIndex = nextIndex;
-  const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
-  MQTT_SERVER = mqttServerForCredential(credential);
-
-  if (mqtt.connected()) {
-    mqtt.disconnect();
-  }
-  mqtt.setServer(MQTT_SERVER, MQTT_PORT);
-  WiFi.disconnect(false);
-  WiFi.begin(credential.ssid, credential.password);
   lastWiFiAttemptMs = millis();
   lastWiFiStatusPrintMs = lastWiFiAttemptMs;
-  mqttTcpDiagnosticPrinted = false;
-  wifiWasConnected = false;
-
-  Serial.print("# WiFi connecting to ");
-  Serial.print(credential.ssid);
-  Serial.print(" (");
-  Serial.print(currentWiFiCredentialIndex + 1);
-  Serial.print("/");
-  Serial.print(WIFI_CREDENTIAL_COUNT);
-  Serial.print(") mqtt=");
-  Serial.println(MQTT_SERVER);
+  Serial.println("# WiFi skipped: no configured SSID is currently visible");
 }
 
 void beginWiFi() {
@@ -483,7 +549,10 @@ void maintainWiFi() {
 
   if (millis() - lastWiFiStatusPrintMs >= WIFI_STATUS_PRINT_INTERVAL_MS) {
     lastWiFiStatusPrintMs = millis();
-    Serial.print("# WiFi waiting status=");
+    const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+    Serial.print("# WiFi waiting for ");
+    printWiFiCredentialSummary(credential);
+    Serial.print(" status=");
     Serial.print(wifiStatusToString(WiFi.status()));
     Serial.print(" elapsed_s=");
     Serial.println(elapsedMs / 1000UL);
@@ -493,7 +562,10 @@ void maintainWiFi() {
     return;
   }
 
-  Serial.print("# WiFi connect timeout status=");
+  const WiFiCredential &credential = WIFI_CREDENTIALS[currentWiFiCredentialIndex];
+  Serial.print("# WiFi connect timeout for ");
+  printWiFiCredentialSummary(credential);
+  Serial.print(" status=");
   Serial.println(wifiStatusToString(WiFi.status()));
   Serial.println("# WiFi trying next saved network");
   startWiFiAttempt();

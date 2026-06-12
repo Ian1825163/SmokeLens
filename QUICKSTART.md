@@ -42,6 +42,42 @@ macOS / Linux:
 mosquitto -c broker/mosquitto.conf -v
 ```
 
+如果看到：
+
+```text
+Error: Address already in use
+```
+
+代表 port `1883` 已經被另一個 MQTT broker 或舊的 `mosquitto`
+佔用。先找出 PID：
+
+macOS / Linux:
+
+```bash
+lsof -nP -iTCP:1883 -sTCP:LISTEN
+```
+
+如果 `COMMAND` 是 `mosquitto`，可以關掉舊的 broker：
+
+```bash
+kill <PID>
+```
+
+例如：
+
+```bash
+kill 53806
+```
+
+再重新啟動：
+
+```bash
+mosquitto -c broker/mosquitto.conf -v
+```
+
+如果 `COMMAND` 不是 `mosquitto`，先確認那個程式是不是可以停掉，
+不要直接 kill 不認識的系統服務。
+
 Terminal 2: backend + dashboard
 
 Windows PowerShell:
@@ -68,14 +104,11 @@ powershell -ExecutionPolicy Bypass -File .\tools\SerialCsvLogger.ps1 -Port COM11
 
 macOS:
 
-- 這個 repo 目前提供的是 PowerShell 版 `tools/SerialCsvLogger.ps1`。
-- 如果你的 Mac 已安裝 `pwsh`，可以這樣跑：
+- 使用 macOS 內建的 Python 3，不需要安裝 PowerShell 或 pyserial：
 
 ```bash
-pwsh -File ./tools/SerialCsvLogger.ps1 -Port /dev/cu.usbserial-110
+python3 ./tools/serial_csv_logger.py --port /dev/cu.usbserial-130
 ```
-
-- 如果還沒裝 PowerShell，先用 `Mosquitto + backend + SmokeLens.ino` 這條主流程收資料即可。
 
 ESP32 插著筆電供電並跑 `SmokeLens.ino` 後：
 
@@ -258,7 +291,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\SerialCsvLogger.ps1 -ListPorts
 macOS:
 
 ```bash
-ls /dev/cu.*
+python3 ./tools/serial_csv_logger.py --list-ports
 ```
 
 假設 ESP32 是 Windows 的 `COM5` 或 macOS 的 `/dev/cu.usbserial-110`，開始記錄：
@@ -272,8 +305,11 @@ powershell -ExecutionPolicy Bypass -File .\tools\SerialCsvLogger.ps1 -Port COM5
 macOS:
 
 ```bash
-pwsh -File ./tools/SerialCsvLogger.ps1 -Port /dev/cu.usbserial-110
+python3 ./tools/serial_csv_logger.py --port /dev/cu.usbserial-130
 ```
+
+Mac 上不需要修改 `SmokeLens.ino`。若只使用 USB Serial，可以不啟動 Mosquitto
+與 backend；Arduino Serial Monitor 必須先關閉，避免占用同一個 serial port。
 
 輸出會放在：
 
