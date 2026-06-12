@@ -44,9 +44,9 @@ const defaultNodeLocations = {
 module.exports = {
   repoRoot,
   dataDir: defaultDataDir,
-  dbPath: resolveOptionalPath(
-    process.env.DB_PATH,
-    path.join(defaultDataDir, "smokelens.sqlite")
+  csvPath: resolveOptionalPath(
+    process.env.CSV_PATH,
+    path.join(defaultDataDir, "smokelens.csv")
   ),
   httpPort: numberFromEnv("HTTP_PORT", 3000),
   mqttUrl: process.env.MQTT_URL || "mqtt://localhost:1883",

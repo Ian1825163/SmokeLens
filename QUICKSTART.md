@@ -7,10 +7,10 @@
 | 目的 | 要開的檔案 / 要跑的服務 | 你應該看到 |
 | --- | --- | --- |
 | 只測 4 個開關與 LED | `tools/GpioButtonTest/GpioButtonTest.ino` | Serial 印出 0/1，GPIO32 接地時 LED 亮 |
-| 測完整 ESP32 感測器但不收進 DB | `SmokeLens.ino` + Arduino Serial Monitor | 每 1 秒印一行 JSON |
+| 測完整 ESP32 感測器但不收檔 | `SmokeLens.ino` + Arduino Serial Monitor | 每 1 秒印一行 JSON |
 | 用 USB Serial 收 CSV | `tools/SerialCsvLogger.ps1` | `data/serial/...csv` 自動分段產生 |
-| 穩定收資料進 SQLite | Mosquitto + backend + `SmokeLens.ino` | backend log 出現 `[data] ...`，DB 有資料 |
-| 匯出資料做分析 | backend export API 或 `npm run export:csv` | 產生 CSV |
+| 穩定收資料進 CSV | Mosquitto + backend + `SmokeLens.ino` | backend log 出現 `[data] ...`，`data/smokelens.csv` 有資料 |
+| 匯出資料做分析 | 直接使用 `data/smokelens.csv`，或 backend export API | 取得篩選後的 CSV |
 
 ## 0.1 目前實測可用啟動流程
 
@@ -112,7 +112,7 @@ python3 ./tools/serial_csv_logger.py --port /dev/cu.usbserial-130
 
 ESP32 插著筆電供電並跑 `SmokeLens.ino` 後：
 
-- MQTT 成功時，資料會進 backend / SQLite / dashboard。
+- MQTT 成功時，資料會進 backend / `data/smokelens.csv` / dashboard。
 - Serial logger 會同步把每筆 JSON 存到 `data/serial/`。
 - 切換 mode 或 label 時，Serial logger 會自動收尾上一段 CSV 並開新檔。
 
@@ -414,7 +414,7 @@ PowerShell 可能會擋 `npm.ps1`，所以 Windows PowerShell 建議固定用 `n
 
 ```text
 [http] listening on http://localhost:3000
-[db] ...\data\smokelens.sqlite
+[csv] ...\data\smokelens.csv
 [mqtt] connected mqtt://localhost:1883
 [mqtt] subscribed smokelens/+/data
 ```

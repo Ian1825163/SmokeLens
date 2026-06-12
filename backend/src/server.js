@@ -6,7 +6,7 @@ const { WebSocketServer, WebSocket } = require("ws");
 
 const config = require("./config");
 const { classifyReading, inferReading } = require("./classifier");
-const { openDatabase } = require("./db");
+const { openStore } = require("./store");
 const { READING_COLUMNS, rowToCsv } = require("./csv");
 
 const SERVER_STARTED_AT = Date.now();
@@ -93,7 +93,7 @@ function registerRoutes(app, wss, store) {
       ok: true,
       mqtt_url: config.mqttUrl,
       mqtt_topic: config.mqttTopic,
-      db_path: config.dbPath,
+      csv_path: config.csvPath,
       server_started_at: SERVER_STARTED_AT,
       server_started_at_iso: new Date(SERVER_STARTED_AT).toISOString(),
       websocket_clients: wss.clients.size
@@ -157,7 +157,7 @@ function registerRoutes(app, wss, store) {
 }
 
 async function main() {
-  const store = await openDatabase(config);
+  const store = openStore(config);
   const app = express();
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
@@ -226,7 +226,7 @@ async function main() {
 
   server.listen(config.httpPort, "0.0.0.0", () => {
     console.log(`[http] listening on http://localhost:${config.httpPort}`);
-    console.log(`[db] ${config.dbPath}`);
+    console.log(`[csv] ${config.csvPath}`);
   });
 
   function shutdown() {

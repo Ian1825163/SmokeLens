@@ -36,10 +36,9 @@ Completed today:
 - MQTT publishing was enabled in firmware.
 - Mosquitto local broker config was added at `broker/mosquitto.conf`.
 - Node.js backend was added under `backend/`.
-- Backend receives MQTT, stores readings in SQLite, exposes API, and exports CSV.
-- `better-sqlite3` was replaced by `sql.js` to avoid Visual Studio C++ build issues on Windows/Node v24.
+- Backend receives MQTT, appends readings to CSV, exposes API, and exports filtered CSV.
 - `npm.cmd install` completed successfully.
-- `data/smokelens.sqlite` was created successfully.
+- `data/smokelens.csv` is the backend's primary data store.
 - WiFi/MQTT secrets were moved out of `SmokeLens.ino` into ignored `arduino_secrets.h`.
 - `arduino_secrets.example.h` was added as the committed template.
 
@@ -48,7 +47,7 @@ Button/mode feature work completed and merged:
 - Added ESP32 button-controlled mode switching.
 - Added firmware JSON fields for data collection labels and raw inference-mode sensor output.
 - Moved final smoke inference to the backend so rules/models can change without reflashing ESP32.
-- Added backend database/CSV columns for mode, labels, inference class, score, and model version.
+- Added backend CSV columns for mode, labels, inference class, score, and model version.
 - Added `QUICKSTART.md` so GPIO tests, data collection, backend startup, and CSV export commands are easier to find.
 - Added multi-WiFi firmware configuration through `SMOKELENS_WIFI_CREDENTIALS`, while keeping the old single-WiFi macros compatible.
 - Added `tools/SerialCsvLogger.ps1` for USB Serial data collection without MQTT, with automatic CSV splitting by mode/label segment.
@@ -61,7 +60,7 @@ Important local-only files:
 
 - `arduino_secrets.h` contains local WiFi/MQTT values and is ignored by git.
 - `backend/.env` contains local backend settings and is ignored by git.
-- `data/smokelens.sqlite` is generated data and is ignored by git.
+- `data/smokelens.csv` is generated data and is ignored by git.
 
 ## 1. Current Architecture
 
@@ -70,8 +69,8 @@ ESP32 sensor node
   -> WiFi
   -> Mosquitto MQTT broker on laptop
   -> Node.js backend
-  -> SQLite database
-  -> API / CSV export
+  -> data/smokelens.csv
+  -> API / filtered CSV export
 ```
 
 Topic:
@@ -106,7 +105,7 @@ Backend:
 - `backend/package.json`
 - `backend/package-lock.json`
 - `backend/src/server.js`
-- `backend/src/db.js`
+- `backend/src/store.js`
 - `backend/src/config.js`
 - `backend/src/classifier.js`
 - `backend/src/csv.js`
@@ -117,7 +116,7 @@ Backend:
 
 Data:
 
-- generated DB: `data/smokelens.sqlite`
+- generated readings: `data/smokelens.csv`
 
 ## 2.1 Button/LED Mapping
 
@@ -253,7 +252,7 @@ Expected:
 
 ```text
 [http] listening on http://localhost:3000
-[db] ...\data\smokelens.sqlite
+[csv] ...\data\smokelens.csv
 [mqtt] connected mqtt://localhost:1883
 [mqtt] subscribed smokelens/+/data
 ```
@@ -296,7 +295,7 @@ Expected backend log:
 [data] node_01 mode=inference label=- infer=normal_air ts=... voc=... co=... pm25=... pms=true
 ```
 
-## 7. Verify API And Database
+## 7. Verify API And CSV Data
 
 Health:
 
@@ -410,7 +409,7 @@ Files that should not be committed:
 - `arduino_secrets.h`
 - `backend/.env`
 - `backend/node_modules/`
-- `data/*.sqlite`
+- `data/*.csv`
 - `.pio/`
 
 Before push:

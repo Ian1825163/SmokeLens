@@ -5,10 +5,12 @@ SmokeLens 是一個分散式煙霧偵測專題。這個 repo 目前包含單一 
 目前資料流：
 
 ```text
-ESP32 sensor node -> Mosquitto MQTT broker -> Node.js backend -> SQLite -> CSV / API
+ESP32 sensor node -> Mosquitto MQTT broker -> Node.js backend -> CSV / API
 ```
 
-ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料存進 SQLite，並負責目前的規則式 inference；之後可匯出 CSV 做 baseline 與 SVM-RBF 訓練。
+ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料直接追加到 CSV，並負責目前的規則式 inference；同一份 CSV 可供 baseline 與 SVM-RBF 訓練使用。
+
+主要資料檔是 `data/smokelens.csv`，可用 `CSV_PATH` 指定其他位置。
 
 ## Quick Links
 
@@ -55,7 +57,7 @@ backend 使用：
 - `mqtt`：訂閱 `smokelens/+/data`
 - `express`：提供 local API
 - `ws`：預留 dashboard 即時推送
-- `sql.js`：寫入 `data/smokelens.sqlite`
+- Node.js `fs`：追加寫入 `data/smokelens.csv`
 - `Leaflet + OpenStreetMap`：顯示固定節點位置與偵測區域
 
 常用 API：
@@ -155,7 +157,6 @@ curl http://localhost:3000/api/latest
 arduino_secrets.h
 backend/.env
 backend/node_modules/
-data/*.sqlite
 data/*.csv
 data/serial/
 .pio/
@@ -188,7 +189,7 @@ Rows with only SSID/password still work and fall back to
 
 下一個重點是穩定收集 labeled data：
 
-1. 確認 ESP32 -> MQTT -> backend -> SQLite 全流程穩定。
+1. 確認 ESP32 -> MQTT -> backend -> CSV 全流程穩定。
 2. 分別收 normal air、cooking fume、vehicle exhaust、cigarette smoke / 替代煙源資料。
 3. 匯出 CSV 做 baseline、feature engineering。
 4. 訓練 SVM-RBF。

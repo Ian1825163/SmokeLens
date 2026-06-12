@@ -2,7 +2,7 @@
   "name": "smokelens-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "SmokeLens MQTT receiver, SQLite storage, and local API server.",
+  "description": "SmokeLens MQTT receiver, CSV storage, and local API server.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -13,7 +13,6 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "mqtt": "^5.10.4",
-    "sql.js": "^1.12.0",
     "ws": "^8.18.0"
   }
 }

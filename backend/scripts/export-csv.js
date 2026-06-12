@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const config = require("../src/config");
-const { openDatabase } = require("../src/db");
+const { openStore } = require("../src/store");
 const { READING_COLUMNS, rowToCsv } = require("../src/csv");
 
 const outputPath =
@@ -11,8 +11,8 @@ const outputPath =
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-async function main() {
-  const store = await openDatabase(config);
+function main() {
+  const store = openStore(config);
   const rows = store.historyReadings({
     limit: config.exportLimitMax,
     maxLimit: config.exportLimitMax,
@@ -32,7 +32,9 @@ async function main() {
   });
 }
 
-main().catch((error) => {
+try {
+  main();
+} catch (error) {
   console.error(error);
   process.exit(1);
-});
+}

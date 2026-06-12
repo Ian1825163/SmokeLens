@@ -24,7 +24,7 @@ temperature
 humidity
 ```
 
-`voc_raw` and `co_raw` are still stored in SQLite for debugging, but they are
+`voc_raw` and `co_raw` are still stored in CSV for debugging, but they are
 not used for MLP training because they are redundant with the calibrated
 millivolt features.
 
@@ -39,8 +39,8 @@ python3 -m pip install -r ml/requirements-ml.txt
 
 ## Prepare Train/Test Data
 
-The script reads `data/smokelens.sqlite`, filters usable labeled rows, and
-writes CSV files under `ml/datasets/`.
+The script reads `data/datapool.csv`, filters usable labeled rows, and writes
+train/test CSV files under `ml/datasets/`.
 
 ```bash
 python3 ml/scripts/prepare_dataset.py
@@ -49,8 +49,7 @@ python3 ml/scripts/prepare_dataset.py
 Useful options:
 
 ```bash
-python3 ml/scripts/prepare_dataset.py --test-size 0.2 --seed 42
-python3 ml/scripts/prepare_dataset.py --db data/smokelens.sqlite --out-dir ml/datasets
+python3 ml/scripts/prepare_dataset.py --csv data/datapool.csv --out-dir ml/datasets
 ```
 
 Rows are usable only when:
@@ -63,10 +62,10 @@ Rows are usable only when:
 ## Train MLP
 
 ```bash
-python3 ml/scripts/train_mlp.py
+python3 ml/scripts/train.py
 ```
 
-This trains a scikit-learn MLP with feature standardization. The default model
+This trains a PyTorch MLP with feature standardization. The default model
 shape is:
 
 ```text
@@ -80,6 +79,16 @@ with `--hidden-layers 32,16`.
 The script writes:
 
 ```text
-ml/models/smokelens_mlp.joblib
+ml/models/smokelens_mlp.pt
 ml/models/smokelens_mlp_metadata.json
+ml/results/training_history.csv
 ```
+
+Plot loss and accuracy against epoch after training:
+
+```bash
+python3 ml/scripts/plot_training.py
+```
+
+This writes `ml/results/loss_curve.png` and
+`ml/results/accuracy_curve.png`.

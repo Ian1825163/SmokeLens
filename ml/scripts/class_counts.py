@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Print per-class row counts from SmokeLens SQLite readings."""
+"""Print per-class row counts from the SmokeLens data pool."""
 
 from __future__ import annotations
 
 import argparse
-import sqlite3
+import csv
 from pathlib import Path
 
 
@@ -20,59 +20,39 @@ EXPOSURE_STATES = ["exposure"]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Print SmokeLens data_collection row counts for the 4 labels."
+        description="Print data_collection row counts from data/datapool.csv."
     )
     parser.add_argument(
-        "--db",
-        default=REPO_ROOT / "data" / "smokelens.sqlite",
+        "--csv",
+        default=REPO_ROOT / "data" / "datapool.csv",
         type=Path,
-        help="Path to SmokeLens SQLite database.",
+        help="Path to the data pool CSV file.",
     )
     return parser.parse_args()
 
 
-def has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
-    return any(
-        row[1] == column
-        for row in connection.execute(f"PRAGMA table_info({table})")
-    )
-
-
-def load_counts(db_path: Path) -> tuple[dict[str, int], bool]:
-    if not db_path.exists():
-        raise FileNotFoundError(f"Database not found: {db_path}")
+def load_counts(csv_path: Path) -> tuple[dict[str, int], bool]:
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
 
     counts = {label: 0 for label in CLASS_LABELS}
-    with sqlite3.connect(db_path) as connection:
-        has_trial_state = has_column(connection, "readings", "trial_state")
-        exposure_placeholders = ", ".join("?" for _ in EXPOSURE_STATES)
-        trial_state_filter = (
-            "AND (trial_state IS NULL OR trim(trial_state) = '' "
-            f"OR lower(trial_state) IN ({exposure_placeholders}))"
-            if has_trial_state
-            else ""
-        )
-        query = f"""
-            SELECT collection_label, COUNT(*) AS row_count
-            FROM readings
-            WHERE mode = 'data_collection'
-              AND collection_label IN (?, ?, ?, ?)
-              {trial_state_filter}
-            GROUP BY collection_label
-        """
-        params = (
-            [*CLASS_LABELS, *EXPOSURE_STATES]
-            if has_trial_state
-            else CLASS_LABELS
-        )
-        for label, row_count in connection.execute(query, params):
-            counts[str(label)] = int(row_count)
+    with csv_path.open(newline="", encoding="utf-8-sig") as file:
+        reader = csv.DictReader(file)
+        has_trial_state = "trial_state" in (reader.fieldnames or [])
+        for row in reader:
+            label = (row.get("collection_label") or "").strip()
+            trial_state = (row.get("trial_state") or "").strip().lower()
+            if row.get("mode") != "data_collection" or label not in counts:
+                continue
+            if has_trial_state and trial_state and trial_state not in EXPOSURE_STATES:
+                continue
+            counts[label] += 1
     return counts, has_trial_state
 
 
 def main() -> None:
     args = parse_args()
-    counts, has_trial_state = load_counts(args.db)
+    counts, has_trial_state = load_counts(args.csv)
     if has_trial_state:
         print("filter: untagged rows plus trial_state=exposure")
     else:

@@ -1,6 +1,7 @@
 .pio/
 .vscode/
 .env/
+.venv/
 __pycache__/
 *.pyc
 arduino_secrets.h
@@ -9,11 +10,10 @@ arduino_secrets.h
 *.map
 backend/node_modules/
 backend/.env
-data/*.sqlite
-data/*.sqlite-*
 data/*.db
 data/*.db-*
 data/*.csv
 data/serial/
 data/*.jsonl
 data/mosquitto/
+ml/results/
