@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot SmokeLens training loss and accuracy from training_history.csv."""
+"""Plot median training curves and Q1-Q3 bands across random seeds."""
 
 from __future__ import annotations
 
@@ -21,7 +21,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--run-dir",
         type=Path,
-        help="Run directory to plot. Defaults to the latest directory in ml/runs.",
+        help=(
+            "Run containing seed-* directories. Defaults to the latest valid "
+            "directory in ml/runs."
+        ),
     )
     parser.add_argument(
         "--history",
@@ -39,26 +42,27 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Aggregate every seed-* directory from these runs. The median is "
-            "drawn as a line and the middle 50% (Q1-Q3) as a shaded band."
+            "drawn as a line and the Q1-Q3 interval as a shaded band."
         ),
     )
     return parser.parse_args()
 
 
 def latest_run_dir(runs_dir: Path) -> Path:
-    run_dirs = sorted(path for path in runs_dir.iterdir() if path.is_dir())
+    run_dirs = sorted(
+        path
+        for path in runs_dir.iterdir()
+        if path.is_dir() and find_seed_dirs([path], required=False)
+    )
     if not run_dirs:
-        raise FileNotFoundError(f"No training runs found under {runs_dir}")
+        raise FileNotFoundError(f"No training runs with seed-* folders under {runs_dir}")
     return run_dirs[-1]
 
 
-def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path]:
-    if args.history is not None:
-        history_path = args.history
-    else:
-        run_dir = args.run_dir or latest_run_dir(REPO_ROOT / "ml" / "runs")
-        history_path = run_dir / "training_history.csv"
-    return history_path, args.out_dir or history_path.parent
+def resolve_run_dirs(args: argparse.Namespace) -> list[Path]:
+    if args.aggregate_run_dirs:
+        return args.aggregate_run_dirs
+    return [args.run_dir or latest_run_dir(REPO_ROOT / "ml" / "runs")]
 
 
 def optional_float(value: str | None) -> float | None:
@@ -154,14 +158,16 @@ def aggregate_histories(run_dirs: list[Path]) -> tuple[dict[str, list[float]], i
     return aggregate, len(seed_histories)
 
 
-def find_seed_dirs(run_dirs: list[Path]) -> list[Path]:
+def find_seed_dirs(run_dirs: list[Path], required: bool = True) -> list[Path]:
     seed_dirs = sorted(
         seed_dir
         for run_dir in run_dirs
         for seed_dir in run_dir.glob("seed-*")
         if seed_dir.is_dir()
+        and (seed_dir / "training_history.csv").is_file()
+        and (seed_dir / "metadata.json").is_file()
     )
-    if not seed_dirs:
+    if required and not seed_dirs:
         raise FileNotFoundError("No seed-* directories found in aggregate runs")
     return seed_dirs
 
@@ -351,10 +357,13 @@ def save_test_metrics_plot(plt, test_metrics, path):
 
 def main() -> None:
     args = parse_args()
-    if args.aggregate_run_dirs:
-        out_dir = args.out_dir or args.aggregate_run_dirs[0].parent
+    if args.history is not None:
+        history_path = args.history
+        out_dir = args.out_dir or history_path.parent
+        run_dirs = None
     else:
-        history_path, out_dir = resolve_paths(args)
+        run_dirs = resolve_run_dirs(args)
+        out_dir = args.out_dir or run_dirs[0]
     cache_dir = Path(tempfile.gettempdir()) / "smokelens-matplotlib"
     cache_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(cache_dir))
@@ -368,8 +377,8 @@ def main() -> None:
         ) from error
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    if args.aggregate_run_dirs:
-        aggregate, seed_count = aggregate_histories(args.aggregate_run_dirs)
+    if run_dirs is not None:
+        aggregate, seed_count = aggregate_histories(run_dirs)
         output_path = out_dir / "training_curves_aggregate.png"
         save_aggregate_plot(plt, aggregate, seed_count, output_path)
         log_output_path = out_dir / "training_curves_aggregate_log_loss.png"
@@ -378,16 +387,18 @@ def main() -> None:
         )
         test_output_path = out_dir / "test_metrics_summary.png"
         save_test_metrics_plot(
-            plt, load_test_metrics(args.aggregate_run_dirs), test_output_path
+            plt, load_test_metrics(run_dirs), test_output_path
         )
+        print("Run directories: " + ", ".join(str(path) for path in run_dirs))
         print(f"Aggregated {seed_count} seeds")
+        print(f"Wrote {output_path}")
         print(f"Wrote {log_output_path}")
         print(f"Wrote {test_output_path}")
     else:
         history = load_history(history_path)
         output_path = out_dir / "training_curves.png"
         save_plot(plt, history, output_path)
-    print(f"Wrote {output_path}")
+        print(f"Wrote {output_path}")
 
 
 if __name__ == "__main__":

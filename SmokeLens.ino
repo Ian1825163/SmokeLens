@@ -133,8 +133,9 @@ const uint16_t PMS_PAYLOAD_LENGTH = 28;
 // =========================
 // Model Configuration & Helper
 // =========================
-const char *INFERENCE_MODEL_VERSION = "smokelens_linear_seed113";
+const char *INFERENCE_MODEL_VERSION = "smokelens_mlp_7x2x4_seed46";
 const int MODEL_NUM_FEATURES = 7;
+const int MODEL_NUM_HIDDEN = 2;
 const int MODEL_NUM_CLASSES = 4;
 
 const char *MODEL_CLASS_LABELS[MODEL_NUM_CLASSES] = {
@@ -145,55 +146,82 @@ const char *MODEL_CLASS_LABELS[MODEL_NUM_CLASSES] = {
 };
 
 const float MODEL_FEATURE_MEAN[MODEL_NUM_FEATURES] = {
-  2305.9228515625f, 2926.101318359375f, 18.160184860229492f, 
-  30.715734481811523f, 34.105289459228516f, 25.300392150878906f, 61.660335540771484f
+  2330.2529296875f, 2951.18310546875f, 21.832805633544922f,
+  40.26411819458008f, 45.935150146484375f, 25.602771759033203f,
+  62.662818908691406f
 };
 
 const float MODEL_FEATURE_STD[MODEL_NUM_FEATURES] = {
-  125.2475814819336f, 136.65179443359375f, 21.20924949645996f, 
-  39.511295318603516f, 43.04029083251953f, 1.9894168376922607f, 5.42022180557251f
+  138.3492889404297f, 150.11744689941406f, 60.79207229614258f,
+  101.38980102539062f, 123.67350769042969f, 1.9774922132492065f,
+  5.921822547912598f
 };
 
-const float MODEL_WEIGHTS[MODEL_NUM_CLASSES][MODEL_NUM_FEATURES] = {
-  {-1.960134506225586f, -2.133476495742798f, -2.2325689792633057f, -2.4307498931884766f, -2.419905662536621f, -1.4403796195983887f, -0.966325581073761f},
-  {2.926833391189575f, 3.018388032913208f, 1.1783685684204102f, 0.9495610594749451f, 1.1327452659606934f, 1.0835360288619995f, 0.27909553050994873f},
-  {-1.524131417274475f, -1.0074303150177002f, 0.7594223022460938f, 1.6815906763076782f, 1.1190974712371826f, 3.533674955368042f, 1.9251497983932495f},
-  {-0.5985096096992493f, -0.5337437391281128f, 1.4528228044509888f, 1.1665853261947632f, 1.2531754970550537f, -2.854031562805176f, -2.2625951766967773f}
+const float MODEL_HIDDEN_WEIGHTS[MODEL_NUM_HIDDEN][MODEL_NUM_FEATURES] = {
+  {-1.0365674495697021f, -1.5532931089401245f, 0.17726042866706848f,
+   -0.3885403275489807f, 0.3419538140296936f, -1.126071810722351f,
+   -1.215725302696228f},
+  {-1.1333826780319214f, -1.2400188446044922f, -0.9836373925209045f,
+   -0.4688897430896759f, -1.2161506414413452f, 1.4170540571212769f,
+   -0.6437466740608215f}
 };
 
-const float MODEL_BIAS[MODEL_NUM_CLASSES] = {
-  -1.330094575881958f, -0.19149479269981384f, 1.7388094663619995f, 0.1915421038866043f
+const float MODEL_HIDDEN_BIAS[MODEL_NUM_HIDDEN] = {
+  0.041490331292152405f, 0.914577305316925f
 };
 
+const float MODEL_OUTPUT_WEIGHTS[MODEL_NUM_CLASSES][MODEL_NUM_HIDDEN] = {
+  {0.6457064747810364f, 1.0696167945861816f},
+  {-1.034229040145874f, -1.1338354349136353f},
+  {-2.2867629528045654f, 1.5423558950424194f},
+  {1.6596026420593262f, -1.191158413887024f}
+};
 
+const float MODEL_OUTPUT_BIAS[MODEL_NUM_CLASSES] = {
+  -1.7766072750091553f, 1.4398103952407837f, -0.48451095819473267f,
+  -0.9452698230743408f
+};
 
-LocalInferenceResult runLocalInference(float voc_mv, float co_mv, float pm1_0, float pm2_5, float pm10, float temp, float humid) {
+LocalInferenceResult runLocalInference(float voc_mv, float co_mv, float pm1_0,
+                                       float pm2_5, float pm10, float temp,
+                                       float humid) {
   float inputs[MODEL_NUM_FEATURES] = { voc_mv, co_mv, pm1_0, pm2_5, pm10, temp, humid };
   float standardized[MODEL_NUM_FEATURES];
-  
+
   for (int i = 0; i < MODEL_NUM_FEATURES; i++) {
     standardized[i] = (inputs[i] - MODEL_FEATURE_MEAN[i]) / MODEL_FEATURE_STD[i];
   }
-  
+
+  float hidden[MODEL_NUM_HIDDEN];
+  for (int h = 0; h < MODEL_NUM_HIDDEN; h++) {
+    hidden[h] = MODEL_HIDDEN_BIAS[h];
+    for (int f = 0; f < MODEL_NUM_FEATURES; f++) {
+      hidden[h] += MODEL_HIDDEN_WEIGHTS[h][f] * standardized[f];
+    }
+    if (hidden[h] < 0.0f) {
+      hidden[h] = 0.0f;
+    }
+  }
+
   float logits[MODEL_NUM_CLASSES];
   float maxLogit = -1e9f;
   for (int c = 0; c < MODEL_NUM_CLASSES; c++) {
-    logits[c] = MODEL_BIAS[c];
-    for (int f = 0; f < MODEL_NUM_FEATURES; f++) {
-      logits[c] += MODEL_WEIGHTS[c][f] * standardized[f];
+    logits[c] = MODEL_OUTPUT_BIAS[c];
+    for (int h = 0; h < MODEL_NUM_HIDDEN; h++) {
+      logits[c] += MODEL_OUTPUT_WEIGHTS[c][h] * hidden[h];
     }
     if (logits[c] > maxLogit) {
       maxLogit = logits[c];
     }
   }
-  
+
   float exps[MODEL_NUM_CLASSES];
   float sumExp = 0.0f;
   for (int c = 0; c < MODEL_NUM_CLASSES; c++) {
     exps[c] = expf(logits[c] - maxLogit);
     sumExp += exps[c];
   }
-  
+
   int bestIndex = 0;
   float bestProb = 0.0f;
   for (int c = 0; c < MODEL_NUM_CLASSES; c++) {

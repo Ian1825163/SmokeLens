@@ -17,6 +17,12 @@ from statistics import mean, pstdev
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DATASETS_ROOT = REPO_ROOT / "ml" / "datasets"
+DATASET_FILENAMES = {
+    "train": "train.csv",
+    "validation": "validation.csv",
+    "test": "test.csv",
+}
 
 FEATURE_COLUMNS = [
     "voc_mv",
@@ -30,7 +36,7 @@ FEATURE_COLUMNS = [
 LABELS = ["normal_air", "cooking_fume", "vehicle_exhaust", "cigarette_smoke"]
 
 HYPERPARAMETERS = {
-    "HIDDEN_LAYERS": (4,),
+    "HIDDEN_LAYERS": (2,),
     "ACTIVATION": "relu",
     "LEARNING_RATE": 0.001,
     "L2_REGULARIZATION": 0.0001,
@@ -45,19 +51,27 @@ DEFAULT_SEEDS = (42, 43, 44, 45, 46)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--train",
-        default=REPO_ROOT / "ml" / "datasets" / "train.csv",
+        "--dataset-dir",
         type=Path,
+        help=(
+            "Directory containing train.csv, validation.csv, and test.csv. "
+            "Defaults to the latest valid folder under ml/datasets."
+        ),
+    )
+    parser.add_argument(
+        "--train",
+        type=Path,
+        help="Optional train.csv override.",
     )
     parser.add_argument(
         "--validation",
-        default=REPO_ROOT / "ml" / "datasets" / "validation.csv",
         type=Path,
+        help="Optional validation.csv override.",
     )
     parser.add_argument(
         "--test",
-        default=REPO_ROOT / "ml" / "datasets" / "test.csv",
         type=Path,
+        help="Optional test.csv override.",
     )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument(
@@ -83,6 +97,40 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated random seeds.",
     )
     return parser.parse_args()
+
+
+def is_dataset_dir(path: Path) -> bool:
+    return path.is_dir() and all(
+        (path / filename).is_file() for filename in DATASET_FILENAMES.values()
+    )
+
+
+def latest_dataset_dir(root: Path = DATASETS_ROOT) -> Path:
+    if not root.exists():
+        raise FileNotFoundError(f"Dataset root not found: {root}")
+    candidates = sorted(
+        (path for path in root.iterdir() if is_dataset_dir(path)),
+        key=lambda path: path.name,
+    )
+    if not candidates:
+        raise FileNotFoundError(
+            f"No dataset folder containing train/validation/test CSV files under {root}"
+        )
+    return candidates[-1]
+
+
+def resolve_dataset_paths(args: argparse.Namespace) -> tuple[Path, dict[str, Path]]:
+    dataset_dir = args.dataset_dir or latest_dataset_dir()
+    if not is_dataset_dir(dataset_dir):
+        raise FileNotFoundError(
+            f"Dataset directory must contain train.csv, validation.csv, and test.csv: "
+            f"{dataset_dir}"
+        )
+    paths = {
+        name: getattr(args, name) or dataset_dir / filename
+        for name, filename in DATASET_FILENAMES.items()
+    }
+    return dataset_dir, paths
 
 
 def parse_positive_integers(value: str, option: str) -> tuple[int, ...]:
@@ -571,6 +619,7 @@ def write_metrics_csv(path: Path, seed_results: list[dict[str, object]]) -> None
 
 def main() -> None:
     args = parse_args()
+    dataset_dir, source_paths = resolve_dataset_paths(args)
     hidden_layers = parse_hidden_layers(args.hidden_layers)
     feature_columns = parse_feature_columns(args.features)
     seeds = parse_positive_integers(args.seeds, "--seeds")
@@ -590,11 +639,11 @@ def main() -> None:
             "Missing PyTorch. Install with: python3 -m pip install -r ml/requirements-ml.txt"
         ) from error
 
-    x_train_rows, y_train_rows = load_dataset(args.train, feature_columns)
+    x_train_rows, y_train_rows = load_dataset(source_paths["train"], feature_columns)
     x_validation_rows, y_validation_rows = load_dataset(
-        args.validation, feature_columns
+        source_paths["validation"], feature_columns
     )
-    x_test_rows, y_test_rows = load_dataset(args.test, feature_columns)
+    x_test_rows, y_test_rows = load_dataset(source_paths["test"], feature_columns)
     class_weights, class_counts = inverse_frequency_weights(torch, y_train_rows)
 
     x_train = torch.tensor(x_train_rows, dtype=torch.float32)
@@ -611,14 +660,10 @@ def main() -> None:
         "x_test": x_test,
         "y_test": torch.tensor(y_test_rows, dtype=torch.long),
     }
-    source_paths = {
-        "train": args.train,
-        "validation": args.validation,
-        "test": args.test,
-    }
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_dir = create_run_dir(args.runs_dir, args.run_dir)
     print(f"Device: {device}")
+    print(f"Dataset directory: {dataset_dir}")
     print(f"Run directory: {run_dir}")
     print(f"Features: {', '.join(feature_columns)}")
     print("Class weights: " + ", ".join(

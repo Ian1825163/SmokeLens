@@ -7,6 +7,7 @@ import argparse
 import csv
 import math
 from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 
 
@@ -61,7 +62,10 @@ def parse_args() -> argparse.Namespace:
         "--out-dir",
         default=REPO_ROOT / "ml" / "datasets",
         type=Path,
-        help="Directory for generated dataset CSV files.",
+        help=(
+            "Root directory for timestamped dataset folders. Each run writes "
+            "to YYMMDD_HHMMSS under this directory."
+        ),
     )
     parser.add_argument("--train-ratio", default=0.80, type=float)
     parser.add_argument("--validation-ratio", default=0.10, type=float)
@@ -142,9 +146,9 @@ def feature_key(row: dict[str, object]) -> tuple[float, ...]:
     return tuple(float(row[column]) for column in FEATURE_COLUMNS)
 
 
-def deduplicate_rows(
+def remove_conflicting_rows(
     rows: list[dict[str, object]],
-) -> tuple[list[dict[str, object]], int, int]:
+) -> tuple[list[dict[str, object]], int]:
     labels_by_features: dict[tuple[float, ...], set[str]] = defaultdict(set)
     for row in rows:
         labels_by_features[feature_key(row)].add(str(row["label"]))
@@ -152,45 +156,89 @@ def deduplicate_rows(
         key for key, labels in labels_by_features.items() if len(labels) > 1
     }
 
-    ordered = sorted(
-        rows,
-        key=lambda row: (int(row["_sort_timestamp"]), int(row["_source_index"])),
+    filtered = [row for row in rows if feature_key(row) not in conflicting_features]
+    return filtered, len(rows) - len(filtered)
+
+
+def group_duplicate_features(
+    rows: list[dict[str, object]],
+) -> list[list[dict[str, object]]]:
+    grouped: dict[tuple[str, tuple[float, ...]], list[dict[str, object]]] = defaultdict(list)
+    for row in rows:
+        grouped[(str(row["label"]), feature_key(row))].append(row)
+
+    groups = []
+    for group in grouped.values():
+        group.sort(
+            key=lambda row: (
+                int(row["_sort_timestamp"]),
+                str(row["node_id"]),
+                int(row["_source_index"]),
+            )
+        )
+        groups.append(group)
+    groups.sort(
+        key=lambda group: (
+            int(group[0]["_sort_timestamp"]),
+            str(group[0]["node_id"]),
+            int(group[0]["_source_index"]),
+        )
     )
-    seen = set()
-    unique_rows = []
-    duplicate_count = 0
-    conflict_count = 0
-    for row in ordered:
-        features = feature_key(row)
-        if features in conflicting_features:
-            conflict_count += 1
+    return groups
+
+
+def closest_group_boundary(
+    groups: list[list[dict[str, object]]], target_rows: float, minimum: int, maximum: int
+) -> int:
+    cumulative = 0
+    best_index = minimum
+    best_distance = float("inf")
+    for index, group in enumerate(groups, start=1):
+        cumulative += len(group)
+        if index < minimum or index > maximum:
             continue
-        key = (str(row["label"]), features)
-        if key in seen:
-            duplicate_count += 1
-            continue
-        seen.add(key)
-        unique_rows.append(row)
-    return unique_rows, duplicate_count, conflict_count
+        distance = abs(cumulative - target_rows)
+        if distance < best_distance:
+            best_index = index
+            best_distance = distance
+    return best_index
 
 
 def split_class_interval(
     rows: list[dict[str, object]], train_ratio: float, validation_ratio: float
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
-    if len(rows) < 3:
-        raise ValueError("Each class needs at least three usable rows")
-    ordered = sorted(
-        rows,
-        key=lambda row: (
-            int(row["_sort_timestamp"]),
-            str(row["node_id"]),
-            int(row["_source_index"]),
-        ),
+    groups = group_duplicate_features(rows)
+    if len(groups) < 3:
+        raise ValueError("Each class needs at least three distinct feature groups")
+
+    train_end = closest_group_boundary(
+        groups,
+        len(rows) * train_ratio,
+        minimum=1,
+        maximum=len(groups) - 2,
     )
-    train_end = min(len(ordered) - 2, max(1, round(len(ordered) * train_ratio)))
-    validation_count = max(1, round(len(ordered) * validation_ratio))
-    validation_end = min(len(ordered) - 1, train_end + validation_count)
-    return ordered[:train_end], ordered[train_end:validation_end], ordered[validation_end:]
+    validation_end = closest_group_boundary(
+        groups,
+        len(rows) * (train_ratio + validation_ratio),
+        minimum=train_end + 1,
+        maximum=len(groups) - 1,
+    )
+
+    return tuple(
+        sorted(
+            (row for group in group_slice for row in group),
+            key=lambda row: (
+                int(row["_sort_timestamp"]),
+                str(row["node_id"]),
+                int(row["_source_index"]),
+            ),
+        )
+        for group_slice in (
+            groups[:train_end],
+            groups[train_end:validation_end],
+            groups[validation_end:],
+        )
+    )
 
 
 def split_by_chronological_intervals(
@@ -230,31 +278,40 @@ def print_counts(name: str, rows: list[dict[str, object]]) -> None:
     print(f"{name}: {len(rows)} rows ({summary})")
 
 
+def timestamped_output_dir(root: Path) -> Path:
+    return root / datetime.now().strftime("%y%m%d_%H%M%S")
+
+
 def main() -> None:
     args = parse_args()
+    output_dir = timestamped_output_dir(args.out_dir)
     validate_ratios(args.train_ratio, args.validation_ratio)
     loaded_rows = load_rows(args.csv)
     if not loaded_rows:
         raise SystemExit("No usable labeled rows found")
-    rows, duplicate_count, conflict_count = deduplicate_rows(loaded_rows)
+    rows, conflict_count = remove_conflicting_rows(loaded_rows)
+    feature_group_count = len(group_duplicate_features(rows))
+    duplicate_row_count = len(rows) - feature_group_count
 
     train_rows, validation_rows, test_rows = split_by_chronological_intervals(
         rows, args.train_ratio, args.validation_ratio
     )
-    write_csv(args.out_dir / "train.csv", train_rows)
-    write_csv(args.out_dir / "validation.csv", validation_rows)
-    write_csv(args.out_dir / "test.csv", test_rows)
+    write_csv(output_dir / "train.csv", train_rows)
+    write_csv(output_dir / "validation.csv", validation_rows)
+    write_csv(output_dir / "test.csv", test_rows)
 
     print_counts("usable", loaded_rows)
-    print(f"removed same-label duplicate rows: {duplicate_count}")
     print(f"removed conflicting-label rows: {conflict_count}")
-    print_counts("unique", rows)
+    print(f"retained same-label duplicate rows: {duplicate_row_count}")
+    print(f"distinct label/feature groups: {feature_group_count}")
+    print_counts("retained", rows)
     print_counts("train", train_rows)
     print_counts("validation", validation_rows)
     print_counts("test", test_rows)
-    print(f"Wrote {args.out_dir / 'train.csv'}")
-    print(f"Wrote {args.out_dir / 'validation.csv'}")
-    print(f"Wrote {args.out_dir / 'test.csv'}")
+    print(f"dataset directory: {output_dir}")
+    print(f"Wrote {output_dir / 'train.csv'}")
+    print(f"Wrote {output_dir / 'validation.csv'}")
+    print(f"Wrote {output_dir / 'test.csv'}")
 
 
 if __name__ == "__main__":

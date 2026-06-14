@@ -5,14 +5,17 @@ const config = require("./config");
 function loadModel(modelPath) {
   const model = JSON.parse(fs.readFileSync(modelPath, "utf8"));
   const featureCount = model.feature_columns.length;
+  const hiddenCount = model.hidden_bias.length;
   if (
     model.feature_mean.length !== featureCount ||
     model.feature_std.length !== featureCount ||
-    model.weights.length !== model.labels.length ||
-    model.bias.length !== model.labels.length ||
-    model.weights.some((row) => row.length !== featureCount)
+    model.hidden_weights.length !== hiddenCount ||
+    model.hidden_weights.some((row) => row.length !== featureCount) ||
+    model.output_weights.length !== model.labels.length ||
+    model.output_bias.length !== model.labels.length ||
+    model.output_weights.some((row) => row.length !== hiddenCount)
   ) {
-    throw new Error(`Invalid linear model shape: ${modelPath}`);
+    throw new Error(`Invalid MLP model shape: ${modelPath}`);
   }
   return model;
 }
@@ -58,11 +61,20 @@ function inferReading(reading) {
   const standardized = values.map(
     (value, index) => (value - model.feature_mean[index]) / model.feature_std[index]
   );
-  const logits = model.weights.map(
-    (weights, labelIndex) =>
+  const hidden = model.hidden_weights.map((weights, hiddenIndex) =>
+    Math.max(
+      0,
       weights.reduce(
         (sum, weight, featureIndex) => sum + weight * standardized[featureIndex],
-        model.bias[labelIndex]
+        model.hidden_bias[hiddenIndex]
+      )
+    )
+  );
+  const logits = model.output_weights.map(
+    (weights, labelIndex) =>
+      weights.reduce(
+        (sum, weight, hiddenIndex) => sum + weight * hidden[hiddenIndex],
+        model.output_bias[labelIndex]
       )
   );
   const probabilities = softmax(logits);

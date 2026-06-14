@@ -8,7 +8,7 @@ SmokeLens 是一個分散式煙霧偵測專題。這個 repo 目前包含單一 
 ESP32 sensor node -> Mosquitto MQTT broker -> Node.js backend -> CSV / API
 ```
 
-ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料追加到 CSV，並使用訓練完成的線性模型進行四類 inference。
+ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料追加到 CSV，並使用訓練完成的 MLP 模型進行四類 inference。
 
 主要資料檔是 `data/smokelens.csv`，可用 `CSV_PATH` 指定其他位置。
 
@@ -46,12 +46,38 @@ Default 是 inference mode：
 - Button 1 放開：`mode = inference`
 - Button 1 接 GND：`mode = data_collection`
 
-data collection mode 會依 Button 3/5/8 輸出 `collection_label`。inference mode 仍由 ESP32 輸出 raw sensor values，但最終的 `inference_class`、`cigarette_detected`、`inference_score` 由 backend 補上。
+data collection mode 會依 Button 3/5/8 輸出 `collection_label`。inference mode
+由 ESP32 使用本機模型產生 `inference_class`、`cigarette_detected` 與
+`inference_score`，並連同 raw sensor values 上傳。backend 收到 inference mode
+資料後會使用同一份模型重新計算推論，確保 CSV、API 與 dashboard 採用正式模型
+結果，而不依賴裝置 payload 中既有的推論欄位。
 
-backend 使用 seed 113 的 `7 -> 4` 線性模型，版本為
-`smokelens_linear_seed113`。模型輸入會先使用 checkpoint 中的 mean/std
-標準化，再計算四類 softmax probability。`inference_score` 是預測類別的
+目前正式採用 seed 46、epoch 13 的 `7 -> 2 -> 4` ReLU MLP，版本為
+`smokelens_mlp_7x2x4_seed46`：
+
+- 對外模型名稱：`EmberLens 1`
+- 內部模型識別：`emberlens_1_seed46`
+- 推論版本識別：`smokelens_mlp_7x2x4_seed46`
+
+- Input：`voc_mv`、`co_mv`、`pm1_0`、`pm2_5`、`pm10`、`temperature`、`humidity`
+- Hidden layer：2 neurons + ReLU
+- Output：4 classes + softmax
+
+模型輸入會先使用 checkpoint 中的 mean/std 標準化。ESP32 與 backend 使用相同的
+mean/std、hidden/output weights 與 bias。`inference_score` 是預測類別的 softmax
 probability，`cigarette_detected` 只在預測為 `cigarette_smoke` 時成立。
+
+此模型以 validation macro F1 選出，評估結果如下：
+
+- Validation macro F1：`0.9833`
+- Test macro F1：`0.9933`
+- Test accuracy：`99.35%`
+
+來源 checkpoint：
+
+```text
+ml/runs/20260615-060651/seed-46/model.pt
+```
 
 模型檔案位於：
 
@@ -73,7 +99,7 @@ backend 使用：
 - `ws`：預留 dashboard 即時推送
 - Node.js `fs`：追加寫入 `data/smokelens.csv`
 - `Leaflet + OpenStreetMap`：顯示固定節點位置與偵測區域
-- `ml/models/smokelens_linear.json`：四類線性 inference 模型
+- `ml/models/smokelens_linear.json`：四類 `7 -> 2 -> 4` ReLU MLP inference 模型
 
 常用 API：
 

@@ -25,11 +25,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--csv",
         default=REPO_ROOT / "data" / "datapool.csv",
+        # default=REPO_ROOT / "data" / "smokelens.csv",
         type=Path,
         help="Path to the data pool CSV file.",
     )
     return parser.parse_args()
-
 
 def load_counts(csv_path: Path) -> tuple[dict[str, int], bool]:
     if not csv_path.exists():
