@@ -5,7 +5,7 @@ const mqtt = require("mqtt");
 const { WebSocketServer, WebSocket } = require("ws");
 
 const config = require("./config");
-const { classifyReading, inferReading, modelInfo } = require("./classifier");
+const { inferReading, modelInfo } = require("./classifier");
 const { openStore } = require("./store");
 const { READING_COLUMNS, rowToCsv } = require("./csv");
 
@@ -37,13 +37,7 @@ function buildReading(topic, payloadBuffer) {
     received_at: Date.now()
   };
 
-  if (reading.mode === "inference") {
-    Object.assign(reading, inferReading(reading));
-  }
-
-  if (!reading.classification) {
-    reading.classification = classifyReading(reading);
-  }
+  Object.assign(reading, inferReading(reading));
 
   return reading;
 }

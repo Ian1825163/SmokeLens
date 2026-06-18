@@ -8,7 +8,7 @@ SmokeLens 是一個分散式煙霧偵測專題。這個 repo 目前包含單一 
 ESP32 sensor node -> Mosquitto MQTT broker -> Node.js backend -> CSV / API
 ```
 
-ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料追加到 CSV，並使用訓練完成的 MLP 模型進行四類 inference。
+ESP32 負責讀取 MQ-135、MQ-7、PMS5003T，並每 1 秒輸出一筆 raw JSON。筆電端 backend 訂閱 MQTT 訊息，將資料追加到 CSV，並使用訓練完成的 MLP 模型進行 inference。
 
 主要資料檔是 `data/smokelens.csv`，可用 `CSV_PATH` 指定其他位置。
 
@@ -48,9 +48,11 @@ Default 是 inference mode：
 
 data collection mode 會依 Button 3/5/8 輸出 `collection_label`。inference mode
 由 ESP32 使用本機模型產生 `inference_class`、`cigarette_detected` 與
-`inference_score`，並連同 raw sensor values 上傳。backend 收到 inference mode
-資料後會使用同一份模型重新計算推論，確保 CSV、API 與 dashboard 採用正式模型
-結果，而不依賴裝置 payload 中既有的推論欄位。
+`inference_score`，並連同 raw sensor values 上傳。backend 收到任何模式的有效感測
+資料後都會使用同一份模型重新計算推論，確保 CSV、API 與 dashboard 採用正式模型
+結果，而不依賴裝置 payload 中既有的推論欄位。data collection mode 會同時保留
+人工 `collection_label` 與模型的 `inference_class` / `inference_score`，方便比較標籤
+和預測結果。
 
 目前正式採用 seed 46、epoch 13 的 `7 -> 2 -> 4` ReLU MLP，版本為
 `smokelens_mlp_7x2x4_seed46`：
@@ -62,6 +64,15 @@ data collection mode 會依 Button 3/5/8 輸出 `collection_label`。inference m
 - Input：`voc_mv`、`co_mv`、`pm1_0`、`pm2_5`、`pm10`、`temperature`、`humidity`
 - Hidden layer：2 neurons + ReLU
 - Output：4 classes + softmax
+
+目前產品輸出採二分類模式，只顯示 `normal_air` 或 `cigarette_smoke`。底層模型仍計算
+四類 softmax，但正式判斷只使用 `cigarette_smoke` 機率；機率達 0.5 時輸出
+`cigarette_smoke`，否則輸出 `normal_air`。`cooking_fume` 與 `vehicle_exhaust`
+暫時不作為 inference 結果顯示。
+
+另外設有 PM safety guard：`PM1.0 >= 10`、`PM2.5 >= 15`、`PM10 >= 15`
+三項中任兩項達標時，會直接判定為 `cigarette_smoke`，避免模型將明顯升高的
+粒狀物誤判為 normal air。
 
 模型輸入會先使用 checkpoint 中的 mean/std 標準化。ESP32 與 backend 使用相同的
 mean/std、hidden/output weights 與 bias。`inference_score` 是預測類別的 softmax

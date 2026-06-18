@@ -21,6 +21,13 @@ function loadModel(modelPath) {
 }
 
 const model = loadModel(config.modelPath);
+const PM_SMOKE_THRESHOLDS = {
+  pm1_0: 10,
+  pm2_5: 15,
+  pm10: 15
+};
+const PM_REQUIRED_HITS = 2;
+const INFERENCE_VERSION = `${model.model_version}_pm_guard_v1`;
 
 function finiteNumber(value) {
   const parsed = Number(value);
@@ -43,7 +50,7 @@ function unavailableInference() {
     inference_class: null,
     cigarette_detected: false,
     inference_score: null,
-    model_version: model.model_version,
+    model_version: INFERENCE_VERSION,
     classification: "unclassified"
   };
 }
@@ -78,36 +85,44 @@ function inferReading(reading) {
       )
   );
   const probabilities = softmax(logits);
-  const predictedIndex = probabilities.reduce(
-    (bestIndex, probability, index) =>
-      probability > probabilities[bestIndex] ? index : bestIndex,
+  const smokeIndex = model.labels.indexOf("cigarette_smoke");
+  if (smokeIndex < 0) {
+    throw new Error("Model is missing the cigarette_smoke label");
+  }
+  const smokeProbability = probabilities[smokeIndex];
+  const pmHits = Object.entries(PM_SMOKE_THRESHOLDS).reduce(
+    (hits, [column, threshold]) => hits + (finiteNumber(reading[column]) >= threshold ? 1 : 0),
     0
   );
-  const inferenceClass = model.labels[predictedIndex];
+  const pmSmokeDetected = pmHits >= PM_REQUIRED_HITS;
+  const cigaretteDetected = smokeProbability >= 0.5 || pmSmokeDetected;
+  const inferenceClass = cigaretteDetected ? "cigarette_smoke" : "normal_air";
+  const smokeScore = pmSmokeDetected
+    ? Math.max(smokeProbability, pmHits / Object.keys(PM_SMOKE_THRESHOLDS).length)
+    : smokeProbability;
 
   return {
     inference_class: inferenceClass,
-    cigarette_detected: inferenceClass === "cigarette_smoke",
-    inference_score: probabilities[predictedIndex],
-    model_version: model.model_version,
+    cigarette_detected: cigaretteDetected,
+    inference_score: cigaretteDetected ? smokeScore : 1 - smokeProbability,
+    model_version: INFERENCE_VERSION,
     classification: inferenceClass
   };
 }
 
 function classifyReading(reading) {
-  if (reading && reading.mode === "inference") {
-    return inferReading(reading).classification;
-  }
-  return "unclassified";
+  return inferReading(reading).classification;
 }
 
 function modelInfo() {
   return {
-    model_version: model.model_version,
+    model_version: INFERENCE_VERSION,
     architecture: model.architecture,
     feature_columns: [...model.feature_columns],
     labels: [...model.labels],
-    model_path: config.modelPath
+    model_path: config.modelPath,
+    pm_smoke_thresholds: { ...PM_SMOKE_THRESHOLDS },
+    pm_required_hits: PM_REQUIRED_HITS
   };
 }
 

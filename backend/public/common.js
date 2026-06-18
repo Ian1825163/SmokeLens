@@ -10,10 +10,6 @@ const SmokeLens = (() => {
     return response.json();
   }
 
-  function bool(value) {
-    return value === true || value === 1 || value === "true";
-  }
-
   function number(value, fallback = null) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -58,30 +54,31 @@ const SmokeLens = (() => {
       };
     }
 
-    const inferenceClass = String(reading.inference_class || "");
-    const label = String(reading.collection_label || "");
-    const labelledCigarette = label === "cigarette_smoke";
-    const detected =
-      bool(reading.cigarette_detected) ||
-      inferenceClass === "cigarette_smoke" ||
-      labelledCigarette;
+    const inferenceClass = String(
+      reading.inference_class || reading.classification || ""
+    );
+    const collectionLabel = String(reading.collection_label || "");
+    const predictedClass =
+      inferenceClass && inferenceClass !== "unclassified"
+        ? inferenceClass
+        : collectionLabel;
 
-    if (detected) {
+    if (predictedClass === "cigarette_smoke") {
       return {
         key: "alert",
-        label: labelledCigarette ? "Cigarette smoke" : "Smoke detected",
+        label: "Cigarette smoke",
         className: "alert",
         color: "#d43d32",
         intensity: 1
       };
     }
 
-    if (label === "cooking_fume" || label === "vehicle_exhaust") {
+    if (predictedClass === "cooking_fume" || predictedClass === "vehicle_exhaust") {
       return {
         key: "caution",
-        label: label === "cooking_fume" ? "Cooking fume" : "Vehicle exhaust",
+        label: predictedClass === "cooking_fume" ? "Cooking fume" : "Vehicle exhaust",
         className: "caution",
-        color: label === "cooking_fume" ? "#c58b13" : "#d5662f",
+        color: predictedClass === "cooking_fume" ? "#c58b13" : "#d5662f",
         intensity: 0.55
       };
     }
@@ -141,7 +138,6 @@ const SmokeLens = (() => {
   return {
     ageText,
     apiGet,
-    bool,
     connectWebSocket,
     escapeHtml,
     formatNumber,
