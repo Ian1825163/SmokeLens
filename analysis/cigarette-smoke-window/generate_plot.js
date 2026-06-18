@@ -17,6 +17,16 @@ const LABEL_COLORS = {
   cigarette_smoke: "#c43d35"
 };
 
+const DASHBOARD_SERIES = [
+  { key: "vocMv", csv: "voc_mv", label: "VOC mV", color: "#2563eb" },
+  { key: "coMv", csv: "co_mv", label: "CO mV", color: "#7c3aed" },
+  { key: "pm1_0", csv: "pm1_0", label: "PM1.0", color: "#0f766e" },
+  { key: "pm2_5", csv: "pm2_5", label: "PM2.5", color: "#c43d35" },
+  { key: "pm10", csv: "pm10", label: "PM10", color: "#d97706" },
+  { key: "temperature", csv: "temperature", label: "Temp C", color: "#dc2626" },
+  { key: "humidity", csv: "humidity", label: "RH %", color: "#0891b2" }
+];
+
 function splitCsvLineEnough(line) {
   return line.split(",");
 }
@@ -43,13 +53,15 @@ function parseRows() {
       timestamp,
       seconds: timestamp - WINDOW_START,
       label: parts[6],
-      cigaretteDetected: parts[8] === "true",
-      score: Number(parts[9]),
+      cigaretteDetected: parts[7] === "true",
+      score: Number(parts[8]),
       vocMv: Number(parts[12]),
       coMv: Number(parts[13]),
       pm1_0: Number(parts[14]),
       pm2_5: Number(parts[15]),
       pm10: Number(parts[16]),
+      temperature: Number(parts[17]),
+      humidity: Number(parts[18]),
       createdAt: parts.at(-1)
     });
   }
@@ -115,7 +127,9 @@ function writeWindowCsv(rows) {
     "co_mv",
     "pm1_0",
     "pm2_5",
-    "pm10"
+    "pm10",
+    "temperature",
+    "humidity"
   ];
   const body = rows.map((row) =>
     [
@@ -129,7 +143,9 @@ function writeWindowCsv(rows) {
       row.coMv,
       row.pm1_0,
       row.pm2_5,
-      row.pm10
+      row.pm10,
+      row.temperature,
+      row.humidity
     ].join(",")
   );
   fs.writeFileSync(path.join(OUTPUT_DIR, "window.csv"), `${header.join(",")}\n${body.join("\n")}\n`);
@@ -137,21 +153,18 @@ function writeWindowCsv(rows) {
 
 function buildSvg(rows) {
   const width = 1280;
-  const height = 720;
+  const height = 920;
   const margin = { top: 78, right: 70, bottom: 70, left: 82 };
-  const labelTop = 120;
-  const labelHeight = 130;
-  const sensorTop = 325;
-  const sensorHeight = 270;
+  const labelTop = 118;
+  const labelHeight = 128;
+  const seriesTop = 302;
+  const seriesHeight = 48;
+  const seriesGap = 18;
+  const seriesBottom =
+    seriesTop + DASHBOARD_SERIES.length * seriesHeight + (DASHBOARD_SERIES.length - 1) * seriesGap;
   const plotWidth = width - margin.left - margin.right;
   const x = scale(0, WINDOW_END - WINDOW_START, margin.left, width - margin.right);
   const labelY = (label) => labelTop + (LABEL_LEVELS[label] === 1 ? 28 : 95);
-  const pmRange = minMax(rows, "pm2_5");
-  const vocRange = minMax(rows, "vocMv");
-  const coRange = minMax(rows, "coMv");
-  const pmY = scale(0, Math.max(pmRange.max, 16), sensorTop + sensorHeight, sensorTop);
-  const vocY = scale(vocRange.min - 3, vocRange.max + 3, sensorTop + sensorHeight, sensorTop);
-  const coY = scale(coRange.min - 4, coRange.max + 4, sensorTop + sensorHeight, sensorTop);
   const runs = labelRuns(rows);
 
   const labelSegments = runs
@@ -167,7 +180,7 @@ function buildSvg(rows) {
     .slice(1)
     .map((run) => {
       const xPos = x(run.startSeconds);
-      return `<line x1="${xPos.toFixed(2)}" y1="${labelTop}" x2="${xPos.toFixed(2)}" y2="${sensorTop + sensorHeight}" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 8"/>`;
+      return `<line x1="${xPos.toFixed(2)}" y1="${labelTop}" x2="${xPos.toFixed(2)}" y2="${seriesBottom}" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 8"/>`;
     })
     .join("\n    ");
 
@@ -176,15 +189,15 @@ function buildSvg(rows) {
     .map((run) => {
       const x1 = x(run.startSeconds);
       const w = x(run.endSeconds + 1) - x1;
-      return `<rect x="${x1.toFixed(2)}" y="${labelTop - 22}" width="${w.toFixed(2)}" height="${sensorTop + sensorHeight - labelTop + 22}" fill="#c43d35" opacity="0.08"/>`;
+      return `<rect x="${x1.toFixed(2)}" y="${labelTop - 22}" width="${w.toFixed(2)}" height="${seriesBottom - labelTop + 22}" fill="#c43d35" opacity="0.08"/>`;
     })
     .join("\n    ");
 
   const ticks = [0, 30, 60, 90, 120, 150]
     .map((second) => {
       const xPos = x(second);
-      return `<line x1="${xPos.toFixed(2)}" y1="${sensorTop + sensorHeight}" x2="${xPos.toFixed(2)}" y2="${sensorTop + sensorHeight + 8}" stroke="#68707c"/>
-      <text x="${xPos.toFixed(2)}" y="${sensorTop + sensorHeight + 30}" text-anchor="middle" font-size="15" fill="#374151">+${second}s</text>`;
+      return `<line x1="${xPos.toFixed(2)}" y1="${seriesBottom}" x2="${xPos.toFixed(2)}" y2="${seriesBottom + 8}" stroke="#68707c"/>
+      <text x="${xPos.toFixed(2)}" y="${seriesBottom + 30}" text-anchor="middle" font-size="15" fill="#374151">+${second}s</text>`;
     })
     .join("\n    ");
 
@@ -197,9 +210,25 @@ function buildSvg(rows) {
     })
     .join("\n    ");
 
+  const seriesPanels = DASHBOARD_SERIES.map((series, index) => {
+    const top = seriesTop + index * (seriesHeight + seriesGap);
+    const range = minMax(rows, series.key);
+    const pad = Math.max((range.max - range.min) * 0.12, 0.8);
+    const y = scale(range.min - pad, range.max + pad, top + seriesHeight, top);
+    const mid = (range.min + range.max) / 2;
+    return `<g>
+    <rect x="${margin.left}" y="${top - 8}" width="${plotWidth}" height="${seriesHeight + 16}" fill="#ffffff" stroke="#d9dee7"/>
+    <line x1="${margin.left}" y1="${y(mid).toFixed(2)}" x2="${width - margin.right}" y2="${y(mid).toFixed(2)}" stroke="#eef2f7"/>
+    <path d="${linePath(rows, x, y, series.key)}" fill="none" stroke="${series.color}" stroke-width="2.5"/>
+    <text x="28" y="${top + 18}" font-size="15" font-weight="700" fill="${series.color}">${series.label}</text>
+    <text x="${width - margin.right + 8}" y="${top + 6}" font-size="12" fill="#4b5563">${range.max.toFixed(1)}</text>
+    <text x="${width - margin.right + 8}" y="${top + seriesHeight}" font-size="12" fill="#4b5563">${range.min.toFixed(1)}</text>
+  </g>`;
+  }).join("\n  ");
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <rect width="100%" height="100%" fill="#f8fafc"/>
-  <text x="${margin.left}" y="42" font-size="28" font-weight="800" fill="#111827">SmokeLens label transition window</text>
+  <text x="${margin.left}" y="42" font-size="28" font-weight="800" fill="#111827">SmokeLens dashboard values during label transition</text>
   <text x="${margin.left}" y="68" font-size="16" fill="#4b5563">2026-06-15 14:34:40-14:37:10 UTC+8 · timestamp ${WINDOW_START}-${WINDOW_END}</text>
 
   <rect x="${margin.left}" y="${labelTop - 38}" width="${plotWidth}" height="${labelHeight + 54}" fill="#ffffff" stroke="#d9dee7"/>
@@ -212,21 +241,14 @@ function buildSvg(rows) {
   ${labelSegments}
   ${labelText}
 
-  <rect x="${margin.left}" y="${sensorTop - 24}" width="${plotWidth}" height="${sensorHeight + 24}" fill="#ffffff" stroke="#d9dee7"/>
+  ${seriesPanels}
   ${transitionLines}
-  <path d="${linePath(rows, x, pmY, "pm2_5")}" fill="none" stroke="#c43d35" stroke-width="3"/>
-  <path d="${linePath(rows, x, vocY, "vocMv")}" fill="none" stroke="#2563eb" stroke-width="2" opacity="0.85"/>
-  <path d="${linePath(rows, x, coY, "coMv")}" fill="none" stroke="#7c3aed" stroke-width="2" opacity="0.85"/>
-  <line x1="${margin.left}" y1="${pmY(15).toFixed(2)}" x2="${width - margin.right}" y2="${pmY(15).toFixed(2)}" stroke="#c43d35" stroke-width="1.5" stroke-dasharray="6 6" opacity="0.6"/>
-  <text x="${width - margin.right + 8}" y="${pmY(15).toFixed(2)}" font-size="13" fill="#9f302a">PM2.5 15</text>
   ${ticks}
-  <text x="${margin.left}" y="${height - 20}" font-size="14" fill="#4b5563">seconds from 14:34:40 UTC+8</text>
+  <text x="${margin.left}" y="${height - 28}" font-size="14" fill="#4b5563">seconds from 14:34:40 UTC+8</text>
 
-  <g transform="translate(${margin.left},640)">
-    <circle cx="0" cy="0" r="6" fill="#c43d35"/><text x="12" y="5" font-size="15" fill="#374151">PM2.5</text>
-    <circle cx="92" cy="0" r="6" fill="#2563eb"/><text x="104" y="5" font-size="15" fill="#374151">VOC mV</text>
-    <circle cx="195" cy="0" r="6" fill="#7c3aed"/><text x="207" y="5" font-size="15" fill="#374151">CO mV</text>
-    <rect x="288" y="-8" width="18" height="16" fill="#c43d35" opacity="0.12"/><text x="314" y="5" font-size="15" fill="#374151">cigarette_smoke interval</text>
+  <g transform="translate(${margin.left},${height - 64})">
+    <rect x="0" y="-8" width="18" height="16" fill="#c43d35" opacity="0.12"/><text x="26" y="5" font-size="15" fill="#374151">cigarette_smoke interval</text>
+    <line x1="230" y1="0" x2="260" y2="0" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 8"/><text x="270" y="5" font-size="15" fill="#374151">label transition</text>
   </g>
 </svg>
 `;
@@ -272,6 +294,10 @@ function writeSummary(rows) {
     "| label | timestamp start | timestamp end | rows |",
     "| --- | ---: | ---: | ---: |",
     ...runs.map((run) => `| ${run.label} | ${run.startTimestamp} | ${run.endTimestamp} | ${run.count} |`),
+    "",
+    "Dashboard values plotted:",
+    "",
+    ...DASHBOARD_SERIES.map((series) => `- \`${series.csv}\``),
     "",
     "Generated files:",
     "",

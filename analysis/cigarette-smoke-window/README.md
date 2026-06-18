@@ -15,6 +15,16 @@ Label runs:
 | cigarette_smoke | 1781505324 | 1781505388 | 62 |
 | normal_air | 1781505389 | 1781505430 | 40 |
 
+Dashboard values plotted:
+
+- `voc_mv`
+- `co_mv`
+- `pm1_0`
+- `pm2_5`
+- `pm10`
+- `temperature`
+- `humidity`
+
 Generated files:
 
 - `window.csv`: extracted rows used for the plot
