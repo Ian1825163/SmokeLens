@@ -18,8 +18,8 @@ const LABEL_COLORS = {
 };
 
 const DASHBOARD_SERIES = [
-  { key: "vocMv", csv: "voc_mv", label: "VOC mV", color: "#2563eb" },
-  { key: "coMv", csv: "co_mv", label: "CO mV", color: "#7c3aed" },
+  { key: "vocRaw", csv: "voc_raw", label: "VOC raw", color: "#2563eb" },
+  { key: "coRaw", csv: "co_raw", label: "CO raw", color: "#7c3aed" },
   { key: "pm1_0", csv: "pm1_0", label: "PM1.0", color: "#0f766e" },
   { key: "pm2_5", csv: "pm2_5", label: "PM2.5", color: "#c43d35" },
   { key: "pm10", csv: "pm10", label: "PM10", color: "#d97706" },
@@ -49,19 +49,28 @@ function parseRows() {
       continue;
     }
 
+    const modelIndex = parts.findIndex((part) =>
+      part === "rule_fallback_v0" || part.startsWith("smokelens_")
+    );
+    if (modelIndex < 0) {
+      continue;
+    }
+
     rows.push({
       timestamp,
       seconds: timestamp - WINDOW_START,
       label: parts[6],
-      cigaretteDetected: parts[7] === "true",
-      score: Number(parts[8]),
-      vocMv: Number(parts[12]),
-      coMv: Number(parts[13]),
-      pm1_0: Number(parts[14]),
-      pm2_5: Number(parts[15]),
-      pm10: Number(parts[16]),
-      temperature: Number(parts[17]),
-      humidity: Number(parts[18]),
+      cigaretteDetected: parts[modelIndex - 2] === "true",
+      score: Number(parts[modelIndex - 1]),
+      vocRaw: Number(parts[modelIndex + 1]),
+      coRaw: Number(parts[modelIndex + 2]),
+      vocMv: Number(parts[modelIndex + 3]),
+      coMv: Number(parts[modelIndex + 4]),
+      pm1_0: Number(parts[modelIndex + 5]),
+      pm2_5: Number(parts[modelIndex + 6]),
+      pm10: Number(parts[modelIndex + 7]),
+      temperature: Number(parts[modelIndex + 8]),
+      humidity: Number(parts[modelIndex + 9]),
       createdAt: parts.at(-1)
     });
   }
@@ -123,8 +132,8 @@ function writeWindowCsv(rows) {
     "inference_class",
     "cigarette_detected",
     "inference_score",
-    "voc_mv",
-    "co_mv",
+    "voc_raw",
+    "co_raw",
     "pm1_0",
     "pm2_5",
     "pm10",
@@ -139,8 +148,8 @@ function writeWindowCsv(rows) {
       row.label,
       row.cigaretteDetected,
       row.score,
-      row.vocMv,
-      row.coMv,
+      row.vocRaw,
+      row.coRaw,
       row.pm1_0,
       row.pm2_5,
       row.pm10,
@@ -153,26 +162,27 @@ function writeWindowCsv(rows) {
 
 function buildSvg(rows) {
   const width = 1280;
-  const height = 920;
+  const height = 790;
   const margin = { top: 78, right: 70, bottom: 70, left: 82 };
-  const labelTop = 118;
-  const labelHeight = 128;
-  const seriesTop = 302;
+  const labelTop = 108;
+  const labelHeight = 68;
+  const seriesTop = 232;
   const seriesHeight = 48;
   const seriesGap = 18;
   const seriesBottom =
     seriesTop + DASHBOARD_SERIES.length * seriesHeight + (DASHBOARD_SERIES.length - 1) * seriesGap;
   const plotWidth = width - margin.left - margin.right;
   const x = scale(0, WINDOW_END - WINDOW_START, margin.left, width - margin.right);
-  const labelY = (label) => labelTop + (LABEL_LEVELS[label] === 1 ? 28 : 95);
+  const labelY = (label) => labelTop + (LABEL_LEVELS[label] === 1 ? 18 : 52);
   const runs = labelRuns(rows);
+  const smokeRun = runs.find((run) => run.label === "cigarette_smoke");
 
   const labelSegments = runs
     .map((run) => {
       const x1 = x(run.startSeconds);
       const x2 = x(run.endSeconds + 1);
       const y = labelY(run.label);
-      return `<line x1="${x1.toFixed(2)}" y1="${y}" x2="${x2.toFixed(2)}" y2="${y}" stroke="${LABEL_COLORS[run.label]}" stroke-width="10" stroke-linecap="round"/>`;
+      return `<line x1="${x1.toFixed(2)}" y1="${y}" x2="${x2.toFixed(2)}" y2="${y}" stroke="${LABEL_COLORS[run.label]}" stroke-width="7" stroke-linecap="round"/>`;
     })
     .join("\n    ");
 
@@ -189,26 +199,59 @@ function buildSvg(rows) {
     .map((run) => {
       const x1 = x(run.startSeconds);
       const w = x(run.endSeconds + 1) - x1;
-      return `<rect x="${x1.toFixed(2)}" y="${labelTop - 22}" width="${w.toFixed(2)}" height="${seriesBottom - labelTop + 22}" fill="#c43d35" opacity="0.08"/>`;
+      return `<rect x="${x1.toFixed(2)}" y="${labelTop - 14}" width="${w.toFixed(2)}" height="${seriesBottom - labelTop + 14}" fill="#c43d35" opacity="0.08"/>`;
     })
     .join("\n    ");
 
-  const ticks = [0, 30, 60, 90, 120, 150]
-    .map((second) => {
+  const ticks = [
+    { second: 0, label: "14:34:40" },
+    { second: 20, label: "14:35:00" },
+    { second: 50, label: "14:35:30" },
+    { second: 80, label: "14:36:00" },
+    { second: 110, label: "14:36:30" },
+    { second: 140, label: "14:37:00" }
+  ]
+    .map(({ second, label }) => {
       const xPos = x(second);
       return `<line x1="${xPos.toFixed(2)}" y1="${seriesBottom}" x2="${xPos.toFixed(2)}" y2="${seriesBottom + 8}" stroke="#68707c"/>
-      <text x="${xPos.toFixed(2)}" y="${seriesBottom + 30}" text-anchor="middle" font-size="15" fill="#374151">+${second}s</text>`;
+      <text x="${xPos.toFixed(2)}" y="${seriesBottom + 30}" text-anchor="middle" font-size="15" fill="#374151">${label}</text>`;
     })
     .join("\n    ");
 
   const labelText = runs
     .map((run) => {
       const center = (x(run.startSeconds) + x(run.endSeconds + 1)) / 2;
-      const y = labelY(run.label) - 16;
+      const y = labelY(run.label) - 10;
       const text = run.label === "cigarette_smoke" ? "cigarette_smoke" : "normal_air";
-      return `<text x="${center.toFixed(2)}" y="${y}" text-anchor="middle" font-size="14" font-weight="700" fill="${LABEL_COLORS[run.label]}">${text}</text>`;
+      return `<text x="${center.toFixed(2)}" y="${y}" text-anchor="middle" font-size="12" font-weight="700" fill="${LABEL_COLORS[run.label]}">${text}</text>`;
     })
     .join("\n    ");
+
+  const smokeBoundaryMarkers = smokeRun
+    ? [
+        {
+          seconds: smokeRun.startSeconds,
+          text: "14:35:24",
+          anchor: "middle",
+          dx: 0
+        },
+        {
+          seconds: smokeRun.endSeconds + 1,
+          text: "14:36:29",
+          anchor: "middle",
+          dx: 0
+        }
+      ]
+        .map((marker) => {
+          const xPos = x(marker.seconds);
+          return `<g>
+    <line x1="${xPos.toFixed(2)}" y1="${seriesBottom + 54}" x2="${xPos.toFixed(2)}" y2="${seriesBottom + 36}" stroke="#9f302a" stroke-width="2"/>
+    <path d="M${(xPos - 6).toFixed(2)},${(seriesBottom + 44).toFixed(2)} L${xPos.toFixed(2)},${(seriesBottom + 54).toFixed(2)} L${(xPos + 6).toFixed(2)},${(seriesBottom + 44).toFixed(2)}" fill="none" stroke="#9f302a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="${(xPos + marker.dx).toFixed(2)}" y="${seriesBottom + 78}" text-anchor="${marker.anchor}" font-size="14" font-weight="700" fill="#9f302a">${marker.text}</text>
+  </g>`;
+        })
+        .join("\n  ")
+    : "";
 
   const seriesPanels = DASHBOARD_SERIES.map((series, index) => {
     const top = seriesTop + index * (seriesHeight + seriesGap);
@@ -220,7 +263,7 @@ function buildSvg(rows) {
     <rect x="${margin.left}" y="${top - 8}" width="${plotWidth}" height="${seriesHeight + 16}" fill="#ffffff" stroke="#d9dee7"/>
     <line x1="${margin.left}" y1="${y(mid).toFixed(2)}" x2="${width - margin.right}" y2="${y(mid).toFixed(2)}" stroke="#eef2f7"/>
     <path d="${linePath(rows, x, y, series.key)}" fill="none" stroke="${series.color}" stroke-width="2.5"/>
-    <text x="28" y="${top + 18}" font-size="15" font-weight="700" fill="${series.color}">${series.label}</text>
+    <text x="${margin.left - 12}" y="${top + 18}" text-anchor="end" font-size="15" font-weight="700" fill="${series.color}">${series.label}</text>
     <text x="${width - margin.right + 8}" y="${top + 6}" font-size="12" fill="#4b5563">${range.max.toFixed(1)}</text>
     <text x="${width - margin.right + 8}" y="${top + seriesHeight}" font-size="12" fill="#4b5563">${range.min.toFixed(1)}</text>
   </g>`;
@@ -230,26 +273,25 @@ function buildSvg(rows) {
   <rect width="100%" height="100%" fill="#f8fafc"/>
   <text x="${margin.left}" y="42" font-size="28" font-weight="800" fill="#111827">SmokeLens dashboard values during label transition</text>
   <text x="${margin.left}" y="68" font-size="16" fill="#4b5563">2026-06-15 14:34:40-14:37:10 UTC+8 · timestamp ${WINDOW_START}-${WINDOW_END}</text>
+  <g transform="translate(858,34)">
+    <rect x="0" y="-8" width="18" height="16" fill="#c43d35" opacity="0.12"/><text x="26" y="5" font-size="14" fill="#374151">cigarette_smoke interval</text>
+    <line x1="0" y1="28" x2="30" y2="28" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 8"/><text x="40" y="33" font-size="14" fill="#374151">label transition</text>
+  </g>
 
-  <rect x="${margin.left}" y="${labelTop - 38}" width="${plotWidth}" height="${labelHeight + 54}" fill="#ffffff" stroke="#d9dee7"/>
+  <rect x="${margin.left}" y="${labelTop - 26}" width="${plotWidth}" height="${labelHeight + 34}" fill="#ffffff" stroke="#d9dee7"/>
   ${smokeBand}
   ${transitionLines}
   <line x1="${margin.left}" y1="${labelY("cigarette_smoke")}" x2="${width - margin.right}" y2="${labelY("cigarette_smoke")}" stroke="#e5e7eb"/>
   <line x1="${margin.left}" y1="${labelY("normal_air")}" x2="${width - margin.right}" y2="${labelY("normal_air")}" stroke="#e5e7eb"/>
-  <text x="36" y="${labelY("cigarette_smoke") + 5}" font-size="15" fill="#374151">smoke</text>
-  <text x="28" y="${labelY("normal_air") + 5}" font-size="15" fill="#374151">normal</text>
+  <text x="${margin.left - 12}" y="${labelY("cigarette_smoke") + 5}" text-anchor="end" font-size="13" fill="#374151">smoke</text>
+  <text x="${margin.left - 12}" y="${labelY("normal_air") + 5}" text-anchor="end" font-size="13" fill="#374151">normal</text>
   ${labelSegments}
   ${labelText}
 
   ${seriesPanels}
   ${transitionLines}
   ${ticks}
-  <text x="${margin.left}" y="${height - 28}" font-size="14" fill="#4b5563">seconds from 14:34:40 UTC+8</text>
-
-  <g transform="translate(${margin.left},${height - 64})">
-    <rect x="0" y="-8" width="18" height="16" fill="#c43d35" opacity="0.12"/><text x="26" y="5" font-size="15" fill="#374151">cigarette_smoke interval</text>
-    <line x1="230" y1="0" x2="260" y2="0" stroke="#8a8f98" stroke-width="1.5" stroke-dasharray="5 8"/><text x="270" y="5" font-size="15" fill="#374151">label transition</text>
-  </g>
+  ${smokeBoundaryMarkers}
 </svg>
 `;
 }
@@ -282,6 +324,40 @@ function writeSummary(rows) {
   const lines = [
     "# Cigarette Smoke Window Plot",
     "",
+    "## Codex Handoff Summary",
+    "",
+    "Purpose:",
+    "",
+    "- Build a compact visualization that shows one clean `normal_air -> cigarette_smoke -> normal_air` transition from `data/smokelens.csv`.",
+    "- The chart should be presentation-ready and should reflect the values actually shown on the dashboard.",
+    "",
+    "Current branch work:",
+    "",
+    "- Created this analysis folder and reproducible generator.",
+    "- Selected a clear transition window from 2026-06-15 after 13:00 UTC+8.",
+    "- Generated `window.csv`, `smoke_window.svg`, and `index.html`.",
+    "- Changed the plot from model mV features to dashboard display fields.",
+    "- Fixed a CSV parsing bug caused by empty inference columns before `cigarette_detected`; parser now locates `model_version` and reads sensor fields relative to that position.",
+    "- Made the label timeline thinner and the whole SVG more compact.",
+    "- Moved the legend to the top-right.",
+    "- Left-side series labels are right-aligned outside the plotting area so text does not enter the panels.",
+    "- X-axis tick labels use UTC+8 time-of-day format, including origin `14:34:40`.",
+    "- Red downward arrows mark the cigarette smoke boundary times only: `14:35:24` and `14:36:29`.",
+    "",
+    "Important constraints:",
+    "",
+    "- Do not commit or push these latest local chart/layout changes until the user explicitly says so.",
+    "- Do not include `.DS_Store` or `analysis/.DS_Store`.",
+    "- Dashboard VOC/CO display uses `voc_raw` and `co_raw`, not `voc_mv` / `co_mv`.",
+    "- Model feature columns use `voc_mv` / `co_mv`, but this chart intentionally follows dashboard display values.",
+    "- PM and climate fields should parse as `pm1_0`, `pm2_5`, `pm10`, `temperature`, `humidity`; if `pm1_0` is near 2890 or temperature is 2-96, the CSV columns are misaligned.",
+    "",
+    "Local status at handoff:",
+    "",
+    "- Latest generated SVG height is `790` for a compact layout.",
+    "- The bottom `time of day, UTC+8` axis caption was removed.",
+    "- The user is iterating visually; expect small layout/text refinements before commit.",
+    "",
     "Selected window:",
     "",
     "```text",
@@ -304,6 +380,13 @@ function writeSummary(rows) {
     "- `window.csv`: extracted rows used for the plot",
     "- `smoke_window.svg`: static chart",
     "- `index.html`: browser-friendly wrapper for the chart",
+    "",
+    "Shared analysis data:",
+    "",
+    "- `../data/datapool.csv`: shared analysis data for teammates.",
+    "- It started as a copy of `data/datapool.csv`, then missing rows from the full SmokeLens log were appended.",
+    "- Merge identity used `node_id,timestamp,mode,model_version,voc_raw,co_raw,pm1_0,pm2_5,pm10,temperature,humidity` instead of `id`, because `datapool.csv` already had duplicate `id` values.",
+    "- The shared file lives under `analysis/` so teammates can use it for plotting even though root `data/*.csv` is ignored by `.gitignore`.",
     "",
     "Regenerate with:",
     "",
