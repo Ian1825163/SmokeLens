@@ -18,3 +18,5 @@ data/*.jsonl
 data/mosquitto/
 ml/results/
 ml/runs/
+.DS_Store
+*/.DS_Store
